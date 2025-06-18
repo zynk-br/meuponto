@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const { chromium } = require('playwright');
 const Store = require('electron-store');
@@ -10,6 +11,24 @@ let browser;
 let page;
 let executionInterval;
 let dailySchedule = [];
+
+
+function setupAutoUpdater() {
+    logToUI('[INFO] Verificando atualizações...');
+    autoUpdater.checkForUpdatesAndNotify();
+
+    autoUpdater.on('update-available', () => {
+        logToUI('[INFO] Nova atualização disponível. Baixando em segundo plano...');
+    });
+
+    autoUpdater.on('update-downloaded', () => {
+        logToUI('[SUCESSO] Atualização baixada. Ela será instalada na próxima vez que o aplicativo for reiniciado.');
+    });
+
+    autoUpdater.on('error', (err) => {
+        logToUI('[ERRO] Erro no auto-updater: ' + err.message);
+    });
+}
 
 // Adicione esta função para obter o caminho do navegador dinamicamente
 function getBrowserExecutablePath() {
@@ -48,6 +67,27 @@ function getBrowserExecutablePath() {
     }
 }
 
+async function sendTelegramNotification(message) {
+    const settings = store.get('telegramSettings');
+
+    if (!settings || !settings.token || !settings.chatId) {
+        logToUI('[AVISO] Configurações do Telegram não encontradas. Notificação pulada.');
+        return;
+    }
+
+    const url = `https://api.telegram.org/bot${settings.token}/sendMessage`;
+    try {
+        await axios.post(url, {
+            chat_id: settings.chatId,
+            text: message,
+            parse_mode: 'Markdown'
+        });
+        logToUI('[SUCESSO] Notificação enviada para o Telegram.');
+    } catch (error) {
+        logToUI('[ERRO] Falha ao enviar notificação. Verifique o Token e Chat ID. Erro: ' + error.message);
+    }
+}
+
 function createWindow() {
     mainWindow = new BrowserWindow({
         width: 900,
@@ -65,7 +105,10 @@ function createWindow() {
     //mainWindow.webContents.openDevTools();
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+    createWindow();
+    setupAutoUpdater();
+});
 
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
@@ -101,6 +144,10 @@ ipcMain.handle('set-login', (event, credentials) => {
 // NOVO: Handlers para salvar e carregar os horários
 ipcMain.handle('get-schedules', () => store.get('schedules'));
 ipcMain.handle('set-schedules', (event, schedules) => store.set('schedules', schedules));
+
+// Adicione estes novos handlers no lugar dos antigos do .env
+ipcMain.handle('get-telegram-settings', () => store.get('telegramSettings'));
+ipcMain.handle('set-telegram-settings', (event, settings) => store.set('telegramSettings', settings));
 
 // Função para enviar logs para a UI
 const logToUI = (message) => {
@@ -349,6 +396,9 @@ async function monitorAndExecutePunches() {
             const actualClickTime = new Date(); // Captura a hora exata do clique
             nextPunch.punched = true;
             logToUI(`[SUCESSO] Ponto (${nextPunch.id}) registrado às ${formatTime(actualClickTime)}.`);
+
+            const notificationMessage = `✅ Ponto de *${nextPunch.id}* registrado com sucesso às *${formatTime(actualClickTime)}*.`;
+            await sendTelegramNotification(notificationMessage);
 
             // Lógica de Correção
             const delayInMinutes = Math.round((actualClickTime.getTime() - scheduledTime.getTime()) / 60000);

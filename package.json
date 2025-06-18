@@ -17,13 +17,15 @@
     "electron-builder": "^26.0.12"
   },
   "dependencies": {
+    "axios": "^1.10.0",
     "cross-env": "^7.0.3",
     "electron-store": "7",
+    "electron-updater": "^6.6.2",
     "playwright": "^1.53.0"
   },
   "build": {
     "appId": "com.meu-ponto.app",
-    "productName": "Meu Ponto App",
+    "productName": "Meu Ponto",
     "files": [
       "main.js",
       "preload.js",
@@ -38,6 +40,11 @@
         ]
       }
     ],
+    "publish": {
+      "provider": "github",
+      "owner": "dgateles",
+      "repo": "meuponto"
+    },
     "win": {
       "target": "nsis"
     },

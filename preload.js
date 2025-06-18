@@ -19,4 +19,8 @@ contextBridge.exposeInMainWorld('api', {
     startAutomation: (data) => ipcRenderer.invoke('start-automation', data),
     cancelAutomation: () => ipcRenderer.send('cancel-automation'),
     onLogMessage: (callback) => ipcRenderer.on('log-message', (event, ...args) => callback(...args)),
+
+    // NOVO: Handlers de configuração do Telegram
+    getTelegramSettings: () => ipcRenderer.invoke('get-telegram-settings'),
+    setTelegramSettings: (settings) => ipcRenderer.invoke('set-telegram-settings', settings),
 });

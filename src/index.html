@@ -34,9 +34,22 @@
                     <input type="checkbox" id="save-login-checkbox">
                     <label for="save-login-checkbox">Salvar login</label>
                 </div>
+
+            <!-- NOVO: Seção de Configuração de Notificações -->
+                <details class="settings-details">
+                    <summary>Configurar Notificações</summary>
+                    <div class="settings-content">
+                        <p>Preencha para receber alertas no Telegram.</p>
+                        <label for="telegram-token">Token do Bot do Telegram:</label>
+                        <input type="password" id="telegram-token" placeholder="Ex: 123456:ABC-DEF...">
+                        <label for="telegram-chat-id">Sua Chat ID do Telegram:</label>
+                        <input type="text" id="telegram-chat-id" placeholder="Ex: 123456789">
+                        <button id="btn-save-telegram" class="small-btn">Salvar Configurações</button>
+                    </div>
+                </details>
+                
                 <button id="btn-login">Acessar</button>
             </div>
-
             <!-- TELA PRINCIPAL -->
             <div id="app-view" class="hidden">
                 <div class="controls">
