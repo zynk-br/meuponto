@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meu Ponto App</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" integrity="sha512-Evv84Mr4kqVGRNSgIGL/F/aIDqQb7xQ2vcrdIwxfjThSH8CSR7PBEakCr51Ck+w+/U6swU2Im1vVX0SVk9ABhg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+</head>
+<body>
+    <!-- NOVO: Barra de título customizada -->
+    <div class="title-bar">
+        <div class="title"></div>
+        <div class="window-controls">
+            <button id="minimize-btn" title="Minimizar"><i class="fa-solid fa-minus"></i></button>
+            <button id="maximize-btn" title="Maximizar"><i class="fa-regular fa-square"></i></button>
+            <button id="close-btn" class="close" title="Fechar"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+    </div>
+    <div class="container">
+        <header>
+            <h1 class="logo">Meu Ponto</h1>
+            <div id="clock">--:--:--</div>
+        </header>
+
+        <main id="main-content">
+            <!-- TELA DE LOGIN -->
+            <div id="login-view">
+                <h2>Login</h2>
+                <input type="text" id="login-numero" placeholder="Número da folha" required>
+                <input type="password" id="login-senha" placeholder="Senha" required>
+                <!-- NOVO: Checkbox para salvar login -->
+                <div class="save-login-wrapper">
+                    <input type="checkbox" id="save-login-checkbox">
+                    <label for="save-login-checkbox">Salvar login</label>
+                </div>
+                <button id="btn-login">Acessar</button>
+            </div>
+
+            <!-- TELA PRINCIPAL -->
+            <div id="app-view" class="hidden">
+                <div class="controls">
+                    <div class="mode-selector">
+                        <label><input type="radio" name="mode" value="manual" checked> Manual</label>
+                        <label><input type="radio" name="mode" value="semi-auto"> Semi-automático</label>
+                    </div>
+                </div>
+
+                <!-- MODO MANUAL -->
+                <div id="manual-mode">
+                    <h3>Modo Manual</h3>
+                    <div id="manual-inputs"></div>
+                </div>
+
+                <!-- MODO SEMI-AUTOMÁTICO -->
+                <div id="semi-auto-mode" class="hidden">
+                    <h3>Modo Semi-automático</h3>
+                    <p>Informe o horário de início das atividades e o sistema preencherá o resto.</p>
+                    <label for="start-time">Horário de Início (Ex: 07:00):</label>
+                    <input type="time" id="start-time">
+                    <button id="btn-generate-times">Gerar Horários</button>
+                </div>
+
+                <div class="action-buttons">
+                    <button id="btn-executar" class="primary">Executar</button>
+                    <button id="btn-limpar">Limpar</button>
+                    <button id="btn-cancelar" class="danger">Interromper Automação</button>
+                </div>
+            </div>
+        </main>
+
+        <footer>
+            <div class="console-header">
+                <h3>Logs</h3>
+                <button id="toggle-console">Ocultar</button>
+            </div>
+            <div id="console" class="visible"></div>
+        </footer>
+    </div>
+    <script src="renderer.js"></script>
+</body>
+</html>
