@@ -50,7 +50,7 @@
     },
     "mac": {
       "target": "dmg",
-      "icon": "images/icon.icns"
+      "icon": "images/icon.png"
     }
   }
 }
