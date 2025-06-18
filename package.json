@@ -1,6 +1,6 @@
 {
-  "name": "easytous",
-  "version": "1.0.0",
+  "name": "meuponto",
+  "version": "1.0.1",
   "description": "Aplicativo para automação de registro de ponto.",
   "main": "main.js",
   "scripts": {
@@ -46,7 +46,8 @@
       "repo": "meuponto"
     },
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "images/icon.ico"
     },
     "mac": {
       "target": "dmg",
