@@ -6,7 +6,6 @@
   "scripts": {
     "start": "electron .",
     "build": "electron-builder -mwl -p always",
-    "build:mac": "electron-builder --mac --x64 -p always",
     "postinstall": "cross-env PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install --with-deps chromium"
   },
   "keywords": [],
@@ -46,12 +45,22 @@
       "repo": "meuponto"
     },
     "win": {
-      "target": "nsis",
+      "target": [
+        "nsis",
+        "zip"
+      ],
       "icon": "images/icon.ico"
     },
     "mac": {
-      "target": "dmg",
-      "icon": "images/icon.png"
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "images/icon.png",
+      "arch": [
+        "x64",
+        "arm64"
+      ]
     }
   }
 }
