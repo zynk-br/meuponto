@@ -141,7 +141,7 @@ main {
     flex-direction: column;
     gap: 15px;
     max-width: 300px;
-    margin: 40px auto;
+    margin: 5px auto;
 }
 
 /* NOVO: Estilo para o wrapper do checkbox */
