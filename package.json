@@ -5,9 +5,8 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder -mwl",
-    "build:mac": "electron-builder --mac --x64",
-    "build:push": "electron-builder -p always",
+    "build": "electron-builder -mwl -p always",
+    "build:mac": "electron-builder --mac --x64 -p always",
     "postinstall": "cross-env PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install --with-deps chromium"
   },
   "keywords": [],
