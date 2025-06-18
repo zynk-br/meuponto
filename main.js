@@ -3,6 +3,7 @@ const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const { chromium } = require('playwright');
 const Store = require('electron-store');
+const axios = require('axios');
 
 const store = new Store();
 
@@ -375,54 +376,27 @@ function setupAndRecalculateSchedule(uiHorarios, scrapedPunches) {
 
 async function monitorAndExecutePunches() {
     const nextPunch = dailySchedule.find(p => !p.punched);
-
-    // Se não há mais pontos a bater, para o monitoramento do dia.
     if (!nextPunch) {
-        logToUI('[SUCESSO] Todos os pontos de hoje foram registrados. Encerrando monitoramento.');
         clearInterval(executionInterval);
         executionInterval = null;
         return;
     }
     
-    const now = new Date();
-    const scheduledTime = parseTime(nextPunch.time);
-
-    // Se a hora atual for maior ou igual à hora agendada...
-    if (now >= scheduledTime) {
-        logToUI(`[EXECUÇÃO] Hora de bater o ponto: ${nextPunch.time}. Realizando clique...`);
-
+    if (new Date() >= parseTime(nextPunch.time)) {
+        logToUI(`[EXECUÇÃO] Hora de bater o ponto: ${nextPunch.time} (${nextPunch.id})...`);
         try {
             await page.click('#localizacao-incluir-ponto');
-            const actualClickTime = new Date(); // Captura a hora exata do clique
+            const actualClickTime = new Date();
             nextPunch.punched = true;
             logToUI(`[SUCESSO] Ponto (${nextPunch.id}) registrado às ${formatTime(actualClickTime)}.`);
-
+            
             const notificationMessage = `✅ Ponto de *${nextPunch.id}* registrado com sucesso às *${formatTime(actualClickTime)}*.`;
             await sendTelegramNotification(notificationMessage);
 
-            // Lógica de Correção
-            const delayInMinutes = Math.round((actualClickTime.getTime() - scheduledTime.getTime()) / 60000);
-
-            if (delayInMinutes > 0) {
-                logToUI(`[AVISO] O ponto foi batido com ${delayInMinutes} minuto(s) de atraso. Corrigindo próximos horários...`);
-                
-                dailySchedule.forEach(punch => {
-                    if (!punch.punched) { // Aplica a correção apenas nos futuros
-                        const oldTime = parseTime(punch.time);
-                        const newTime = new Date(oldTime.getTime() + delayInMinutes * 60000);
-                        punch.time = formatTime(newTime);
-                    }
-                });
-
-                const updatedSchedule = dailySchedule.filter(p => !p.punched).map(p => p.time).join(', ');
-                if (updatedSchedule) {
-                    logToUI(`[INFO] Novo cronograma ajustado: ${updatedSchedule}`);
-                }
-            }
+            // CORREÇÃO: Lógica de recálculo duplicada removida daqui.
 
         } catch (err) {
             logToUI(`[ERRO] Falha ao clicar para registrar o ponto (${nextPunch.id}): ${err.message}`);
-            // Opcional: decidir se deve tentar novamente ou parar. Por segurança, vamos continuar monitorando.
         }
     }
 }
