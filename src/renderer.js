@@ -49,10 +49,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const consoleDiv = document.getElementById('console');
     // const toggleConsoleBtn = document.getElementById('toggle-console');
 
-    // NOVO: Navegador
-    const browserStatusDiv = document.getElementById('browser-status');
-    const btnDownloadBrowser = document.getElementById('btn-download-browser');
-    const downloadProgress = document.getElementById('download-progress');
+    const nodeMissingView = document.getElementById('node-missing-view');
+    const btnOpenNodeLink = document.getElementById('btn-open-node-link');
 
     // --- ESTADO DA APLICAÇÃO ---
     const diasDaSemana = ["Segunda-Feira", "Terça-Feira", "Quarta-Feira", "Quinta-Feira", "Sexta-Feira"];
@@ -64,6 +62,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function showView(viewElement) {
         loadingView.classList.add('hidden');
         loginView.classList.add('hidden');
+        nodeMissingView.classList.add('hidden');
         appView.classList.add('hidden');
         settingsView.classList.add('hidden');
         viewElement.classList.remove('hidden');
@@ -76,6 +75,8 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (status === 'download') {
             loadingText.textContent = 'Baixando navegador (~300 MB)...';
             // A tela de loading já está visível por padrão
+        } else if (status === 'node-missing') {
+            showView(nodeMissingView);
         }
     });
 
@@ -388,6 +389,9 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Botões
+    btnOpenNodeLink.addEventListener('click', () => {
+        window.api.openExternalLink('https://nodejs.org/');
+    });
     btnGenerateTimes.addEventListener('click', generateSemiAutoTimes);
     btnLimpar.addEventListener('click', clearAllInputs);
     btnExecutar.addEventListener('click', async () => {

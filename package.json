@@ -1,6 +1,6 @@
 {
   "name": "meuponto",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Aplicativo para automação de registro de ponto.",
   "main": "main.js",
   "scripts": {
@@ -26,6 +26,7 @@
   "build": {
     "appId": "com.meu-ponto.app",
     "productName": "Meu Ponto",
+    "copyright": "Copyright © 2025 Meu Ponto",
     "files": [
       "main.js",
       "preload.js",
@@ -40,13 +41,7 @@
       "target": [
         "nsis"
       ],
-      "icon": "images/icon.ico",
-      "publisherName": "Meu Ponto",
-      "nsis": {
-        "oneClick": true,
-        "allowToChangeInstallationDirectory": false,
-        "runAfterFinish": true
-      }
+      "icon": "images/icon.ico"
     },
     "mac": {
       "target": [
