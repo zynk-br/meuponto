@@ -447,9 +447,9 @@ input:checked + .slider:before {
 
 /* Display da Versão */
 #version-display {
-  position: absolute; /* Remove o elemento do fluxo normal */
-  bottom: 3px; /* Posiciona a 5px da parte inferior do footer */
-  right: 24px; /* Posiciona a 15px da parte direita do footer */
+  position: relative; /* Remove o elemento do fluxo normal */
+  bottom: 0px; /* Posiciona a 5px da parte inferior do footer */
+  left: 813px; /* Posiciona a 15px da parte direita do footer */
   font-size: 0.8em;
   color: #95a5a6;
 }
