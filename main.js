@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const { chromium } = require('playwright');
@@ -15,7 +15,7 @@ let dailySchedule = [];
 
 
 function setupAutoUpdater() {
-    logToUI('[INFO] Verificando atualizações...');
+    //logToUI('[INFO] Verificando atualizações...');
     autoUpdater.checkForUpdatesAndNotify();
 
     autoUpdater.on('update-available', () => {
@@ -146,9 +146,24 @@ ipcMain.handle('set-login', (event, credentials) => {
 ipcMain.handle('get-schedules', () => store.get('schedules'));
 ipcMain.handle('set-schedules', (event, schedules) => store.set('schedules', schedules));
 
-// Adicione estes novos handlers no lugar dos antigos do .env
+// NOVO: Handles do Telegram
 ipcMain.handle('get-telegram-settings', () => store.get('telegramSettings'));
-ipcMain.handle('set-telegram-settings', (event, settings) => store.set('telegramSettings', settings));
+ipcMain.handle('set-telegram-settings', (event, settings) => {
+    store.set('telegramSettings', settings);
+});
+
+// NOVO: Handle para versão do App
+ipcMain.handle('get-app-info', () => {
+    // Acessa o package.json de forma segura
+    const appVersion = app.getVersion();
+    const repoInfo = require('./package.json').build.publish;
+    const repoUrl = `https://github.com/${repoInfo.owner}/${repoInfo.repo}`;
+    return { version: appVersion, repoUrl };
+});
+
+ipcMain.on('open-external-link', (event, url) => {
+    shell.openExternal(url); // Abre o link no navegador padrão do usuário
+});
 
 // Função para enviar logs para a UI
 const logToUI = (message) => {

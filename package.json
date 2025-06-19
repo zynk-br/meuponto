@@ -1,12 +1,12 @@
 {
   "name": "meuponto",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Aplicativo para automação de registro de ponto.",
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
+    "start": "ELECTRON_ENABLE_LOGGING=true electron .",
     "build:win": "electron-builder -w --x64 --arm64 -p always",
-    "build:mac": "electron-builder -m --x64 --arm64 -p always",
+    "build:mac": "electron-builder -m --x64 --arm64 -c.mac.identity=- -p always",
     "postinstall": "cross-env PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install --with-deps chromium"
   },
   "keywords": [],
@@ -56,8 +56,7 @@
         "dmg",
         "zip"
       ],
-      "icon": "images/icon.icns",
-      "identity": "-"
+      "icon": "images/icon.icns"
     }
   }
 }

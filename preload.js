@@ -23,4 +23,8 @@ contextBridge.exposeInMainWorld('api', {
     // NOVO: Handlers de configuração do Telegram
     getTelegramSettings: () => ipcRenderer.invoke('get-telegram-settings'),
     setTelegramSettings: (settings) => ipcRenderer.invoke('set-telegram-settings', settings),
+
+    // NOVO: Handlers de Versão
+    getAppInfo: () => ipcRenderer.invoke('get-app-info'),
+    openExternalLink: (url) => ipcRenderer.send('open-external-link', url),
 });

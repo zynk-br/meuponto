@@ -11,11 +11,25 @@ document.addEventListener('DOMContentLoaded', () => {
     const clockElement = document.getElementById('clock');
     const loginView = document.getElementById('login-view');
     const appView = document.getElementById('app-view');
+    // NOVO: Settings
+    const settingsView = document.getElementById('settings-view');
+    const btnShowSettings = document.getElementById('btn-show-settings');
+    const btnSaveAndCloseSettings = document.getElementById('btn-save-and-close-settings');
+    const versionDisplay = document.getElementById('version-display');
+    const toggleConsoleCheckbox = document.getElementById('toggle-console-checkbox');
+    const consoleWrapper = document.getElementById('console-wrapper');
+    const tutorialModal = document.getElementById('tutorial-modal');
+
     const manualInputsContainer = document.getElementById('manual-inputs');
     
     const loginNumeroInput = document.getElementById('login-numero');
     const loginSenhaInput = document.getElementById('login-senha');
     const btnLogin = document.getElementById('btn-login');
+
+    // --- TELEGRAM ---
+    const telegramTokenInput = document.getElementById('telegram-token');
+    const telegramChatIdInput = document.getElementById('telegram-chat-id');
+    const btnSaveTelegram = document.getElementById('btn-save-telegram');
 
     const modeRadios = document.querySelectorAll('input[name="mode"]');
     const manualModeDiv = document.getElementById('manual-mode');
@@ -36,6 +50,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- FUNÇÕES ---
 
+
+    // --- LÓGICA DE NAVEGAÇÃO ENTRE TELAS ---
+    function showView(viewElement) {
+        loginView.classList.add('hidden');
+        appView.classList.add('hidden');
+        settingsView.classList.add('hidden');
+        viewElement.classList.remove('hidden');
+    }
+
     // NOVO: Função para carregar o login salvo
     async function loadSavedLogin() {
         const credentials = await window.api.getLogin();
@@ -47,6 +70,18 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             logToConsole('[INFO] Nenhuma credencial salva encontrada.');
         }
+    }
+
+    async function loadTelegramSettings() {
+        const telegramSettings = await window.api.getTelegramSettings();
+        if (telegramSettings) {
+            telegramTokenInput.value = telegramSettings.token || '';
+            telegramChatIdInput.value = telegramSettings.chatId || '';
+            logToConsole('[INFO] Configurações do Telegram carregadas.');
+        } else {
+            logToConsole('[INFO] Nenhuma configuração do Telegram encontrada.');
+        }
+        
     }
 
     // NOVO: Função para carregar os horários salvos
@@ -230,11 +265,54 @@ document.addEventListener('DOMContentLoaded', () => {
                 await window.api.setLogin({ login: '', senha: '' }); // Limpa se desmarcado
             }
 
-            loginView.classList.add('hidden');
-            appView.classList.remove('hidden');
+            showView(appView);
             logToConsole('[INFO] Login efetuado na interface. Configure os horários.');
         } else {
             alert('Por favor, preencha o número e a senha.');
+        }
+    });
+
+    // btnSaveTelegram.addEventListener('click', async () => {
+    //     const settings = { token: telegramTokenInput.value, chatId: telegramChatIdInput.value };
+    //     await window.api.setTelegramSettings(settings);
+    //     alert('Configurações do Telegram salvas!');
+    // });
+
+    btnSaveAndCloseSettings.addEventListener('click', async () => {
+        // Salva as configurações do Telegram antes de fechar
+        const settings = { token: telegramTokenInput.value, chatId: telegramChatIdInput.value };
+        await window.api.setTelegramSettings(settings);
+        alert('Configurações salvas!');
+        showView(appView);
+    });
+
+    // --- LÓGICA DA VERSÃO DO APP ---
+    async function displayAppVersion() {
+        const { version, repoUrl } = await window.api.getAppInfo();
+        const releaseUrl = `${repoUrl}/releases/tag/v${version}`;
+        versionDisplay.innerHTML = `<a id="version-link" href="#">v.${version}</a>`;
+        
+        document.getElementById('version-link').addEventListener('click', (e) => {
+            e.preventDefault();
+            window.api.openExternalLink(releaseUrl);
+        });
+    }
+
+    // --- LÓGICA DO CONSOLE LOG ---
+    toggleConsoleCheckbox.addEventListener('change', () => {
+        consoleWrapper.classList.toggle('hidden', !toggleConsoleCheckbox.checked);
+    });
+    // Garante que o estado inicial seja respeitado
+    consoleWrapper.classList.toggle('hidden', !toggleConsoleCheckbox.checked);
+
+    // --- LÓGICA DA MODAL ---
+    document.querySelectorAll('.info-icon').forEach(icon => {
+        icon.addEventListener('click', () => tutorialModal.classList.remove('hidden'));
+    });
+    document.querySelector('.modal-close-btn').addEventListener('click', () => tutorialModal.classList.add('hidden'));
+    tutorialModal.addEventListener('click', (e) => {
+        if (e.target === tutorialModal) { // Fecha só se clicar no fundo
+            tutorialModal.classList.add('hidden');
         }
     });
 
@@ -269,11 +347,12 @@ document.addEventListener('DOMContentLoaded', () => {
     btnCancelar.addEventListener('click', () => {
         window.api.cancelAutomation();
     });
-    toggleConsoleBtn.addEventListener('click', () => {
-        consoleDiv.classList.toggle('hidden');
-        toggleConsoleBtn.textContent = consoleDiv.classList.contains('hidden') ? 'Mostrar' : 'Ocultar';
-    });
-    
+    // toggleConsoleBtn.addEventListener('click', () => {
+    //     consoleDiv.classList.toggle('hidden');
+    //     toggleConsoleBtn.textContent = consoleDiv.classList.contains('hidden') ? 'Mostrar' : 'Ocultar';
+    // });
+
+    btnShowSettings.addEventListener('click', () => showView(settingsView));
     // API Listener para logs do processo principal
     window.api.onLogMessage(logToConsole);
 
@@ -281,7 +360,9 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(updateClock, 1000);
     updateClock();
     createManualInputs();
+    displayAppVersion();
     logToConsole('[INFO] Aplicação pronta. Por favor, faça o login.');
     loadSavedLogin();
+    loadTelegramSettings();
     loadSavedSchedules();
 });

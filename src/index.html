@@ -1,12 +1,16 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Meu Ponto App</title>
+    <title>Meu Ponto</title>
     <link rel="stylesheet" href="style.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" integrity="sha512-Evv84Mr4kqVGRNSgIGL/F/aIDqQb7xQ2vcrdIwxfjThSH8CSR7PBEakCr51Ck+w+/U6swU2Im1vVX0SVk9ABhg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css"
+        integrity="sha512-Evv84Mr4kqVGRNSgIGL/F/aIDqQb7xQ2vcrdIwxfjThSH8CSR7PBEakCr51Ck+w+/U6swU2Im1vVX0SVk9ABhg=="
+        crossorigin="anonymous" referrerpolicy="no-referrer" />
 </head>
+
 <body>
     <!-- NOVO: Barra de título customizada -->
     <div class="title-bar">
@@ -19,8 +23,12 @@
     </div>
     <div class="container">
         <header>
-            <h1 class="logo">Meu Ponto</h1>
-            <div id="clock">--:--:--</div>
+            <h1 class="title">Meu Ponto</h1>
+            <div class="header-controls">
+                <div id="clock">--:--:--</div>
+                <!-- NOVO: Botão para configurações -->
+                <button id="btn-show-settings" class="icon-btn" title="Configurações"><i class="fa-solid fa-gear"></i></button>
+            </div>
         </header>
 
         <main id="main-content">
@@ -34,20 +42,6 @@
                     <input type="checkbox" id="save-login-checkbox">
                     <label for="save-login-checkbox">Salvar login</label>
                 </div>
-
-            <!-- NOVO: Seção de Configuração de Notificações -->
-                <details class="settings-details">
-                    <summary>Configurar Notificações</summary>
-                    <div class="settings-content">
-                        <p>Preencha para receber alertas no Telegram.</p>
-                        <label for="telegram-token">Token do Bot do Telegram:</label>
-                        <input type="password" id="telegram-token" placeholder="Ex: 123456:ABC-DEF...">
-                        <label for="telegram-chat-id">Sua Chat ID do Telegram:</label>
-                        <input type="text" id="telegram-chat-id" placeholder="Ex: 123456789">
-                        <button id="btn-save-telegram" class="small-btn">Salvar Configurações</button>
-                    </div>
-                </details>
-                
                 <button id="btn-login">Acessar</button>
             </div>
             <!-- TELA PRINCIPAL -->
@@ -80,16 +74,68 @@
                     <button id="btn-cancelar" class="danger">Interromper Automação</button>
                 </div>
             </div>
+            <!-- NOVO: TELA DE CONFIGURAÇÕES -->
+            <div id="settings-view" class="hidden">
+                <h2>Configurações</h2>
+
+                <div class="setting-group">
+                    <h3>Notificações do Telegram <span class="info-icon"
+                            title="Como configurar?"><i class="fa-solid fa-info"></i></span></h3>
+                    <p>Preencha para receber alertas no seu celular.</p>
+                    <label for="telegram-token">Token do Bot</label>
+                    <input type="password" id="telegram-token" placeholder="Cole seu Token aqui">
+
+                    <label for="telegram-chat-id">Seu Chat ID</label>
+                    <input type="text" id="telegram-chat-id" placeholder="Cole sua Chat ID aqui">
+                </div>
+
+                <div class="setting-group">
+                    <h3>Interface</h3>
+                    <label class="switch">
+                        <input id="toggle-console-checkbox" type="checkbox" checked>
+                        <div class="slider round"></div>
+                    </label>
+                </div>
+
+                <div class="action-buttons">
+                    <button id="btn-save-and-close-settings" class="primary">Salvar e Voltar</button>
+                </div>
+            </div>
         </main>
 
         <footer>
-            <div class="console-header">
-                <h3>Logs</h3>
-                <button id="toggle-console">Ocultar</button>
+            <div id="console-wrapper">
+                <div class="console-header">
+                    <h3>Logs</h3>
+                </div>
+                <div id="console" class="visible"></div>
             </div>
-            <div id="console" class="visible"></div>
+            <!-- NOVO: Display da Versão -->
+            <div id="version-display"></div>
         </footer>
+    </div>
+    <!-- NOVO: Estrutura da Modal do Tutorial -->
+    <div id="tutorial-modal" class="modal-backdrop hidden">
+        <div class="modal-content">
+            <button class="modal-close-btn">×</button>
+            <h3>Como Obter suas Credenciais do Telegram</h3>
+            <h4>Passo 1: Criar seu Bot e obter o Token</h4>
+            <ol>
+                <li>No seu app Telegram, procure pelo bot oficial chamado <strong>@BotFather</strong>.</li>
+                <li>Envie o comando <code>/newbot</code> para ele.</li>
+                <li>Siga as instruções para dar um nome (ex: "Meu App Ponto") e um username (ex: "meu_ponto_bot") ao seu bot.</li>
+                <li>O BotFather responderá com uma mensagem contendo seu <strong>Token de API</strong>. Copie-o.</li>
+            </ol>
+            <h4>Passo 2: Obter sua Chat ID</h4>
+            <ol>
+                <li>Encontre o bot que você acabou de criar no Telegram e envie qualquer mensagem para ele (ex: "oi").</li>
+                <li>Abra o navegador do seu computador e acesse a seguinte URL, substituindo <code>SEU_TOKEN_AQUI</code> pelo token que você copiou:<br><code>https://api.telegram.org/bot<strong>SEU_TOKEN_AQUI</strong>/getUpdates</code></li>
+                <li>Você verá um texto na tela. Procure por <code>"chat":{"id":<strong>123456789</strong>, ...}</code>. O número que aparece é a sua <strong>Chat ID</strong>. Copie-a.</li>
+            </ol>
+            <p>Cole as duas informações nos campos de configuração e salve.</p>
+        </div>
     </div>
     <script src="renderer.js"></script>
 </body>
+
 </html>
