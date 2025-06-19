@@ -27,4 +27,12 @@ contextBridge.exposeInMainWorld('api', {
     // NOVO: Handlers de Versão
     getAppInfo: () => ipcRenderer.invoke('get-app-info'),
     openExternalLink: (url) => ipcRenderer.send('open-external-link', url),
+
+    // NOVO: Handlers de Navegador
+    checkBrowser: () => ipcRenderer.invoke('check-browser'),
+    downloadBrowser: () => ipcRenderer.invoke('download-browser'),
+    
+     // NOVO: Listeners para o fluxo de inicialização controlado pelo backend
+    onInitFlow: (callback) => ipcRenderer.on('init-flow', (event, data) => callback(data)),
+    onDownloadComplete: (callback) => ipcRenderer.on('download-complete', (event, result) => callback(result)),
 });

@@ -10,7 +10,6 @@
   --title-bar-bg: #22303f;
 }
 
-
 body {
   font-family: var(--font-family);
   background-color: var(--bg-color);
@@ -20,6 +19,10 @@ body {
   /* ALTERADO: Remover flexbox para permitir o layout com barra de título */
   border-radius: 8px; /* NOVO: Arredondar a janela inteira */
   overflow: hidden; /* NOVO: Esconder qualquer coisa que vaze das bordas arredondadas */
+}
+
+.view-container {
+  width: 100%;
 }
 
 /* NOVO: Estilos para a barra de título customizada */
@@ -263,9 +266,9 @@ button.danger:hover {
 
 /* Console */
 footer {
-    position: relative; /* Cria um contexto para o posicionamento absoluto */
-    padding: 10px 25px 20px;
-    background-color: var(--bg-color);
+  position: relative; /* Cria um contexto para o posicionamento absoluto */
+  padding: 10px 25px 20px;
+  background-color: var(--bg-color);
 }
 
 .console-header {
@@ -382,7 +385,9 @@ footer {
   height: 20px;
 }
 
-.switch input {display:none;}
+.switch input {
+  display: none;
+}
 
 .slider {
   position: absolute;
@@ -392,8 +397,8 @@ footer {
   right: 0;
   bottom: 0;
   background-color: #ccc;
-  -webkit-transition: .4s;
-  transition: .4s;
+  -webkit-transition: 0.4s;
+  transition: 0.4s;
 }
 
 .slider:before {
@@ -404,16 +409,16 @@ footer {
   left: 4px;
   bottom: 4px;
   background-color: white;
-  -webkit-transition: .4s;
-  transition: .4s;
+  -webkit-transition: 0.4s;
+  transition: 0.4s;
 }
 
 input:checked + .slider {
-  background-color: #2196F3;
+  background-color: #2196f3;
 }
 
 input:focus + .slider {
-  box-shadow: 0 0 1px #2196F3;
+  box-shadow: 0 0 1px #2196f3;
 }
 
 input:checked + .slider:before {
@@ -432,30 +437,30 @@ input:checked + .slider:before {
 }
 
 .slider::after {
-  position:absolute;
+  position: absolute;
   width: 300px;
   left: 55px;
 
-  content: "Exibir console de log na tela principal"
+  content: "Exibir console de log na tela principal";
 }
 /* Adicionar mais estilos para o switch se desejar um visual mais elaborado */
 
 /* Display da Versão */
 #version-display {
-    position: absolute; /* Remove o elemento do fluxo normal */
-    bottom: 3px;        /* Posiciona a 5px da parte inferior do footer */
-    right: 24px;        /* Posiciona a 15px da parte direita do footer */
-    font-size: 0.8em;
-    color: #95a5a6;
+  position: absolute; /* Remove o elemento do fluxo normal */
+  bottom: 3px; /* Posiciona a 5px da parte inferior do footer */
+  right: 24px; /* Posiciona a 15px da parte direita do footer */
+  font-size: 0.8em;
+  color: #95a5a6;
 }
 
 #version-display a {
-    color: inherit;
-    text-decoration: none;
-    cursor: pointer;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
 }
 #version-display a:hover {
-    color: var(--primary-color);
+  color: var(--primary-color);
 }
 
 /* Estilos da Modal */
@@ -502,4 +507,52 @@ input:checked + .slider:before {
   background-color: var(--bg-color);
   padding: 2px 5px;
   border-radius: 3px;
+}
+
+/* Estilos para a tela de carregamento */
+#loading-view {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100%; /* Ocupa toda a altura do 'main' */
+  gap: 20px;
+}
+.spinner {
+  width: 50px;
+  height: 50px;
+  border: 5px solid var(--bg-color);
+  border-top: 5px solid var(--primary-color);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+#loading-error {
+  color: var(--danger-color);
+}
+
+/* Estilos para o status do navegador nas configurações */
+#browser-status-setting {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.status-indicator {
+  font-weight: bold;
+}
+.status-indicator.loading {
+  color: #f1c40f;
+}
+.status-indicator.installed {
+  color: var(--success-color);
+}
+.status-indicator.missing {
+  color: var(--danger-color);
 }

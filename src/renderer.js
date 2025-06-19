@@ -12,6 +12,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const loginView = document.getElementById('login-view');
     const appView = document.getElementById('app-view');
     // NOVO: Settings
+    const loadingView = document.getElementById('loading-view');
+    const loadingText = document.getElementById('loading-text');
+    const loadingError = document.getElementById('loading-error');
+    const browserStatusSetting = document.getElementById('browser-status-setting');
     const settingsView = document.getElementById('settings-view');
     const btnShowSettings = document.getElementById('btn-show-settings');
     const btnSaveAndCloseSettings = document.getElementById('btn-save-and-close-settings');
@@ -29,7 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- TELEGRAM ---
     const telegramTokenInput = document.getElementById('telegram-token');
     const telegramChatIdInput = document.getElementById('telegram-chat-id');
-    const btnSaveTelegram = document.getElementById('btn-save-telegram');
+    // const btnSaveTelegram = document.getElementById('btn-save-telegram');
 
     const modeRadios = document.querySelectorAll('input[name="mode"]');
     const manualModeDiv = document.getElementById('manual-mode');
@@ -43,7 +47,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnCancelar = document.getElementById('btn-cancelar');
     
     const consoleDiv = document.getElementById('console');
-    const toggleConsoleBtn = document.getElementById('toggle-console');
+    // const toggleConsoleBtn = document.getElementById('toggle-console');
+
+    // NOVO: Navegador
+    const browserStatusDiv = document.getElementById('browser-status');
+    const btnDownloadBrowser = document.getElementById('btn-download-browser');
+    const downloadProgress = document.getElementById('download-progress');
 
     // --- ESTADO DA APLICAÇÃO ---
     const diasDaSemana = ["Segunda-Feira", "Terça-Feira", "Quarta-Feira", "Quinta-Feira", "Sexta-Feira"];
@@ -53,11 +62,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- LÓGICA DE NAVEGAÇÃO ENTRE TELAS ---
     function showView(viewElement) {
+        loadingView.classList.add('hidden');
         loginView.classList.add('hidden');
         appView.classList.add('hidden');
         settingsView.classList.add('hidden');
         viewElement.classList.remove('hidden');
     }
+
+    // --- LÓGICA DO FLUXO DE INICIALIZAÇÃO ---
+    window.api.onInitFlow(({ status }) => {
+        if (status === 'login') {
+            showView(loginView);
+        } else if (status === 'download') {
+            loadingText.textContent = 'Baixando navegador (~300 MB)...';
+            // A tela de loading já está visível por padrão
+        }
+    });
+
+    window.api.onDownloadComplete(({ success, message }) => {
+        if (success) {
+            showView(loginView);
+        } else {
+            loadingText.textContent = 'Falha no Download';
+            loadingError.textContent = `Erro: ${message}. Por favor, reinicie o aplicativo e tente novamente.`;
+            loadingError.classList.remove('hidden');
+        }
+    });
 
     // NOVO: Função para carregar o login salvo
     async function loadSavedLogin() {
@@ -264,13 +294,45 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 await window.api.setLogin({ login: '', senha: '' }); // Limpa se desmarcado
             }
-
             showView(appView);
             logToConsole('[INFO] Login efetuado na interface. Configure os horários.');
         } else {
             alert('Por favor, preencha o número e a senha.');
         }
     });
+
+    // NOVA FUNÇÃO para gerenciar a UI do navegador
+    // async function browserStatusDiv() {
+    //     logToConsole('[INFO] Verificando status do navegador...');
+    //     const browserExists = await window.api.checkBrowser();
+        
+    //     browserStatusDiv.classList.toggle('hidden', browserExists);
+    //     btnExecutar.disabled = !browserExists;
+        
+    //     if (browserExists) {
+    //         logToConsole('[SUCESSO] Navegador encontrado e pronto para uso.');
+    //     } else {
+    //         logToConsole('[AVISO] Navegador não encontrado. Download necessário.');
+    //     }
+    // }
+    // Listener para o botão de download
+    // btnDownloadBrowser.addEventListener('click', async () => {
+    //     btnDownloadBrowser.classList.add('hidden');
+    //     downloadProgress.classList.remove('hidden');
+    //     logToConsole('[INFO] Requisição de download do navegador enviada...');
+        
+    //     const result = await window.api.downloadBrowser();
+        
+    //     if (result.success) {
+    //         logToConsole('[SUCESSO] Download concluído! Verificando status novamente...');
+    //         // Chama a verificação novamente para atualizar a UI
+    //         await checkBrowserAndSetupUI(); 
+    //     } else {
+    //         logToConsole(`[ERRO] Falha no download. Tente novamente. ${result.message}`);
+    //         downloadProgress.classList.add('hidden');
+    //         btnDownloadBrowser.classList.remove('hidden');
+    //     }
+    // });
 
     // btnSaveTelegram.addEventListener('click', async () => {
     //     const settings = { token: telegramTokenInput.value, chatId: telegramChatIdInput.value };
@@ -352,7 +414,25 @@ document.addEventListener('DOMContentLoaded', () => {
     //     toggleConsoleBtn.textContent = consoleDiv.classList.contains('hidden') ? 'Mostrar' : 'Ocultar';
     // });
 
-    btnShowSettings.addEventListener('click', () => showView(settingsView));
+    btnShowSettings.addEventListener('click', async () => {
+        showView(settingsView);
+        
+        // Atualiza o status do navegador sempre que abrir as configurações
+        const browserStatusEl = browserStatusSetting.querySelector('.status-indicator');
+        browserStatusEl.textContent = 'Verificando...';
+        browserStatusEl.className = 'status-indicator loading';
+
+        const browserExists = await window.api.checkBrowser();
+        
+        if (browserExists) {
+            browserStatusEl.textContent = 'Instalado';
+            browserStatusEl.className = 'status-indicator installed';
+        } else {
+            browserStatusEl.textContent = 'Não Instalado';
+            browserStatusEl.className = 'status-indicator missing';
+        }
+    });
+
     // API Listener para logs do processo principal
     window.api.onLogMessage(logToConsole);
 

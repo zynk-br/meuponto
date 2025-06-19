@@ -27,13 +27,19 @@
             <div class="header-controls">
                 <div id="clock">--:--:--</div>
                 <!-- NOVO: Botão para configurações -->
-                <button id="btn-show-settings" class="icon-btn" title="Configurações"><i class="fa-solid fa-gear"></i></button>
+                <button id="btn-show-settings" class="icon-btn" title="Configurações"><i
+                        class="fa-solid fa-gear"></i></button>
             </div>
         </header>
 
         <main id="main-content">
+            <div id="loading-view" class="view-container">
+                <div class="spinner"></div>
+                <h3 id="loading-text">Verificando componentes...</h3>
+                <p id="loading-error" class="hidden"></p>
+            </div>
             <!-- TELA DE LOGIN -->
-            <div id="login-view">
+            <div id="login-view" class="view-container hidden">
                 <h2>Login</h2>
                 <input type="text" id="login-numero" placeholder="Número da folha" required>
                 <input type="password" id="login-senha" placeholder="Senha" required>
@@ -45,7 +51,7 @@
                 <button id="btn-login">Acessar</button>
             </div>
             <!-- TELA PRINCIPAL -->
-            <div id="app-view" class="hidden">
+            <div id="app-view" class="view-container hidden">
                 <div class="controls">
                     <div class="mode-selector">
                         <label><input type="radio" name="mode" value="manual" checked> Manual</label>
@@ -75,12 +81,12 @@
                 </div>
             </div>
             <!-- NOVO: TELA DE CONFIGURAÇÕES -->
-            <div id="settings-view" class="hidden">
+            <div id="settings-view" class="view-container hidden">
                 <h2>Configurações</h2>
 
                 <div class="setting-group">
-                    <h3>Notificações do Telegram <span class="info-icon"
-                            title="Como configurar?"><i class="fa-solid fa-info"></i></span></h3>
+                    <h3>Notificações do Telegram <span class="info-icon" title="Como configurar?"><i
+                                class="fa-solid fa-info"></i></span></h3>
                     <p>Preencha para receber alertas no seu celular.</p>
                     <label for="telegram-token">Token do Bot</label>
                     <input type="password" id="telegram-token" placeholder="Cole seu Token aqui">
@@ -95,6 +101,14 @@
                         <input id="toggle-console-checkbox" type="checkbox" checked>
                         <div class="slider round"></div>
                     </label>
+                </div>
+
+                <div class="setting-group">
+                    <h3>Componentes</h3>
+                    <div id="browser-status-setting">
+                        <span>Navegador de Automação:</span>
+                        <span class="status-indicator loading">Verificando...</span>
+                    </div>
                 </div>
 
                 <div class="action-buttons">
@@ -123,14 +137,19 @@
             <ol>
                 <li>No seu app Telegram, procure pelo bot oficial chamado <strong>@BotFather</strong>.</li>
                 <li>Envie o comando <code>/newbot</code> para ele.</li>
-                <li>Siga as instruções para dar um nome (ex: "Meu App Ponto") e um username (ex: "meu_ponto_bot") ao seu bot.</li>
+                <li>Siga as instruções para dar um nome (ex: "Meu App Ponto") e um username (ex: "meu_ponto_bot") ao seu
+                    bot.</li>
                 <li>O BotFather responderá com uma mensagem contendo seu <strong>Token de API</strong>. Copie-o.</li>
             </ol>
             <h4>Passo 2: Obter sua Chat ID</h4>
             <ol>
-                <li>Encontre o bot que você acabou de criar no Telegram e envie qualquer mensagem para ele (ex: "oi").</li>
-                <li>Abra o navegador do seu computador e acesse a seguinte URL, substituindo <code>SEU_TOKEN_AQUI</code> pelo token que você copiou:<br><code>https://api.telegram.org/bot<strong>SEU_TOKEN_AQUI</strong>/getUpdates</code></li>
-                <li>Você verá um texto na tela. Procure por <code>"chat":{"id":<strong>123456789</strong>, ...}</code>. O número que aparece é a sua <strong>Chat ID</strong>. Copie-a.</li>
+                <li>Encontre o bot que você acabou de criar no Telegram e envie qualquer mensagem para ele (ex: "oi").
+                </li>
+                <li>Abra o navegador do seu computador e acesse a seguinte URL, substituindo <code>SEU_TOKEN_AQUI</code>
+                    pelo token que você
+                    copiou:<br><code>https://api.telegram.org/bot<strong>SEU_TOKEN_AQUI</strong>/getUpdates</code></li>
+                <li>Você verá um texto na tela. Procure por <code>"chat":{"id":<strong>123456789</strong>, ...}</code>.
+                    O número que aparece é a sua <strong>Chat ID</strong>. Copie-a.</li>
             </ol>
             <p>Cole as duas informações nos campos de configuração e salve.</p>
         </div>

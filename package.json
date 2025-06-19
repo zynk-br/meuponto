@@ -1,12 +1,12 @@
 {
   "name": "meuponto",
-  "version": "1.0.4",
+  "version": "1.0.6",
   "description": "Aplicativo para automação de registro de ponto.",
   "main": "main.js",
   "scripts": {
     "start": "ELECTRON_ENABLE_LOGGING=true electron .",
     "build:win": "electron-builder -w --x64 --arm64 -p always",
-    "build:mac": "electron-builder -m --x64 --arm64 -c.mac.identity=- -p always",
+    "build:mac": "electron-builder -m --x64 --arm64 -p always",
     "postinstall": "cross-env PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install --with-deps chromium"
   },
   "keywords": [],
@@ -31,15 +31,6 @@
       "preload.js",
       "src/**/*"
     ],
-    "extraResources": [
-      {
-        "from": "node_modules/playwright-core/.local-browsers/",
-        "to": "browsers",
-        "filter": [
-          "**/*"
-        ]
-      }
-    ],
     "publish": {
       "provider": "github",
       "owner": "dgateles",
@@ -49,14 +40,20 @@
       "target": [
         "nsis"
       ],
-      "icon": "images/icon.ico"
+      "icon": "images/icon.ico",
+      "publisherName": "Meu Ponto",
+      "nsis": {
+        "oneClick": true,
+        "allowToChangeInstallationDirectory": false,
+        "runAfterFinish": true
+      }
     },
     "mac": {
       "target": [
         "dmg",
         "zip"
       ],
-      "icon": "images/icon.icns"
+      "icon": "images/icon.png"
     }
   }
 }

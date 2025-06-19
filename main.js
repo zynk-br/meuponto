@@ -1,9 +1,13 @@
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
+const fs = require('fs');
 const { chromium } = require('playwright');
 const Store = require('electron-store');
 const axios = require('axios');
+const { exec } = require('child_process');
+const util = require('util');
+const execPromise = util.promisify(exec);
 
 const store = new Store();
 
@@ -13,6 +17,10 @@ let page;
 let executionInterval;
 let dailySchedule = [];
 
+// NOVA FUNÇÃO: Retorna o caminho onde o browser DEVERIA estar
+function getLocalBrowserPath() {
+    return path.join(app.getPath('userData'), 'browsers');
+}
 
 function setupAutoUpdater() {
     //logToUI('[INFO] Verificando atualizações...');
@@ -31,41 +39,45 @@ function setupAutoUpdater() {
     });
 }
 
-// Adicione esta função para obter o caminho do navegador dinamicamente
-function getBrowserExecutablePath() {
-    const isPackaged = app.isPackaged;
+// Caminho do navegador dinamicamente
+function getBrowserExecutablePath(throwOnError = true) {
+    const browserPath = getLocalBrowserPath();
     const platform = process.platform;
     
-    // AQUI ESTÁ A CORREÇÃO: o caminho de desenvolvimento agora aponta para 'playwright' em vez de 'playwright-core'
-    const browsersPath = isPackaged
-        ? path.join(process.resourcesPath, 'browsers')
-        : path.join(__dirname, 'node_modules', 'playwright-core', '.local-browsers');
+    // CORREÇÃO: Lógica de retentativa para lidar com atrasos do sistema de arquivos
+    for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+            if (!fs.existsSync(browserPath)) {
+                throw new Error('Pasta de navegadores não existe.');
+            }
+            const browserFolders = fs.readdirSync(browserPath);
+            const chromiumFolder = browserFolders.find(folder => folder.startsWith('chromium-'));
+            if (!chromiumFolder) throw new Error('Pasta específica do Chromium (ex: chromium-1178) não encontrada.');
+            
+            const executablePaths = {
+                darwin: path.join(browserPath, chromiumFolder, 'chrome-mac', 'Chromium.app', 'Contents', 'MacOS', 'Chromium'),
+                win32: path.join(browserPath, chromiumFolder, 'chrome-win', 'chrome.exe'),
+                linux: path.join(browserPath, chromiumFolder, 'chrome-linux', 'chrome'),
+            };
 
-    const fs = require('fs');
-    // Adicionamos um try-catch para dar um erro mais amigável
-    try {
-        const browserFolders = fs.readdirSync(browsersPath);
-        const chromiumFolder = browserFolders.find(folder => folder.startsWith('chromium'));
+            // Se chegamos aqui, o caminho foi encontrado com sucesso
+            return executablePaths[platform];
 
-        if (!chromiumFolder) {
-            throw new Error('Pasta do navegador Chromium não encontrada.');
+        } catch (error) {
+            // Se for a última tentativa e ainda der erro, lança ou retorna vazio
+            if (attempt === 2) {
+                const userMessage = `Navegador não encontrado. (${error.message})`;
+                if (throwOnError) {
+                    logToUI(`[ERRO] ${userMessage}`);
+                    throw new Error(userMessage);
+                }
+                return '';
+            }
+            // Aguarda 500ms antes de tentar novamente
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
         }
-
-        if (platform === 'darwin') { // macOS
-            return path.join(browsersPath, chromiumFolder, 'chrome-mac', 'Chromium.app', 'Contents', 'MacOS', 'Chromium');
-        } else if (platform === 'win32') { // Windows
-            return path.join(browsersPath, chromiumFolder, 'chrome-win', 'chrome.exe');
-        } else { // Linux
-            return path.join(browsersPath, chromiumFolder, 'chrome-linux', 'chrome');
-        }
-    } catch (error) {
-        // Se a pasta não existe, damos uma instrução clara
-        if (error.code === 'ENOENT') {
-            logToUI('[ERRO] Navegadores não encontrados. Por favor, rode "npm install" novamente para baixá-los.');
-            throw new Error('Diretório de navegadores não encontrado. Execute "npm install".');
-        }
-        throw error; // Lança outros erros
     }
+    return ''; // Fallback
 }
 
 async function sendTelegramNotification(message) {
@@ -89,21 +101,58 @@ async function sendTelegramNotification(message) {
     }
 }
 
+async function checkBrowserHandler() {
+    try {
+        const executablePath = getBrowserExecutablePath(false); // Passa 'false' para não lançar erro
+        return fs.existsSync(executablePath);
+    } catch (error) {
+        return false;
+    }
+}
+
+async function downloadBrowserHandler() {
+    const browserPath = getLocalBrowserPath();
+
+    // GARANTE QUE A PASTA PAI EXISTA ANTES DO DOWNLOAD
+    fs.mkdirSync(browserPath, { recursive: true });
+
+    logToUI('[INFO] Iniciando download do Chromium. Isso pode levar alguns minutos...');
+    const command = `cross-env PLAYWRIGHT_BROWSERS_PATH="${browserPath}" npx playwright install --with-deps chromium`;
+    try {
+        await execPromise(command);
+        logToUI(`[SUCESSO] Navegador baixado com sucesso!`);
+        return { success: true };
+    } catch (error) {
+        logToUI(`[ERRO] Falha ao baixar o navegador: ${error.message}`);
+        return { success: false, message: error.message };
+    }
+}
+
 function createWindow() {
     mainWindow = new BrowserWindow({
-        width: 900,
-        height: 750,
-        frame: false, // NOVO: Remove a moldura padrão da janela
-        //titleBarStyle: 'hidden', // NOVO: Importante para o visual no macOS
+        width: 900, height: 750, frame: false,
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
-            contextIsolation: true,
-            nodeIntegration: false,
+            contextIsolation: true, nodeIntegration: false,
         },
     });
 
+    // NOVO FLUXO: Quando a janela carregar, o backend decide o que fazer
+    mainWindow.webContents.on('did-finish-load', async () => {
+        const browserExists = await checkBrowserHandler();
+        if (browserExists) {
+            // Se o browser existe, manda a UI para a tela de login
+            mainWindow.webContents.send('init-flow', { status: 'login' });
+        } else {
+            // Se não existe, manda a UI para a tela de download e inicia o download
+            mainWindow.webContents.send('init-flow', { status: 'download' });
+            const result = await downloadBrowserHandler();
+            // Informa a UI sobre o resultado do download
+            mainWindow.webContents.send('download-complete', result);
+        }
+    });
+
     mainWindow.loadFile('src/index.html');
-    //mainWindow.webContents.openDevTools();
 }
 
 app.whenReady().then(() => {
@@ -114,6 +163,17 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
         app.quit();
+    }
+});
+
+app.on('will-quit', () => {
+    // Garante que o navegador Playwright seja fechado se ainda estiver aberto
+    if (browser) {
+        browser.close();
+    }
+    // Garante que qualquer intervalo de monitoramento seja limpo
+    if (executionInterval) {
+        clearInterval(executionInterval);
     }
 });
 
@@ -164,6 +224,12 @@ ipcMain.handle('get-app-info', () => {
 ipcMain.on('open-external-link', (event, url) => {
     shell.openExternal(url); // Abre o link no navegador padrão do usuário
 });
+
+// NOVO HANDLER: Verifica se o browser existe
+ipcMain.handle('check-browser', checkBrowserHandler);
+
+// NOVO HANDLER: Inicia o download do browser
+ipcMain.handle('download-browser', downloadBrowserHandler);
 
 // Função para enviar logs para a UI
 const logToUI = (message) => {
