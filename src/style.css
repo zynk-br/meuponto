@@ -556,3 +556,14 @@ input:checked + .slider:before {
 .status-indicator.missing {
   color: var(--danger-color);
 }
+
+pre {
+    color: white;
+    background: rgba(0,0,0,0.3);
+    padding: 8px 10px;
+}
+pre code {
+    font-family: "ui-monospace", "SF Mono", "Monaco", "Menlo", "Consolas", monospace;
+    font-size: 11px;
+    line-height: 1.6;
+}

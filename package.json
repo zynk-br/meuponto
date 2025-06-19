@@ -7,6 +7,8 @@
     "start": "ELECTRON_ENABLE_LOGGING=true electron .",
     "build:win": "electron-builder -w --x64 --arm64 -p always",
     "build:mac": "electron-builder -m --x64 --arm64 -p always",
+    "build:win-local": "electron-builder -w --x64 --arm64",
+    "build:mac-local": "electron-builder -m --x64 --arm64",
     "postinstall": "cross-env PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install --with-deps chromium"
   },
   "keywords": [],
@@ -27,6 +29,7 @@
     "appId": "com.meu-ponto.app",
     "productName": "Meu Ponto",
     "copyright": "Copyright © 2025 Meu Ponto",
+    "afterSign": "./afterSign.js",
     "files": [
       "main.js",
       "preload.js",
