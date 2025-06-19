@@ -9,11 +9,7 @@ const DependencyManager = require("./dependency-manager");
 
 const store = new Store();
 
-let mainWindow;
-let browser;
-let page;
-let executionInterval;
-let dailySchedule = [];
+let mainWindow, browser, page, executionInterval, dailySchedule = [];
 
 // NOVA FUNÇÃO: Retorna o caminho onde o browser DEVERIA estar
 function getLocalBrowserPath() {
@@ -199,10 +195,6 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
-  // Garante que o navegador Playwright seja fechado se ainda estiver aberto
-  if (browser) {
-    browser.close();
-  }
   // Garante que qualquer intervalo de monitoramento seja limpo
   if (executionInterval) {
     clearInterval(executionInterval);
@@ -224,7 +216,34 @@ ipcMain.on("maximize-window", () => {
     mainWindow.maximize();
   }
 });
-ipcMain.on("close-window", () => mainWindow.close());
+
+ipcMain.on('close-window', async () => {
+    logToUI('[INFO] Recebida solicitação para fechar o aplicativo. Encerrando processos...');
+    
+    // 1. Limpa o intervalo de monitoramento
+    if (executionInterval) {
+        clearInterval(executionInterval);
+        executionInterval = null;
+        logToUI('[INFO] Intervalo de monitoramento limpo.');
+    }
+    
+    // 2. Tenta fechar a instância do navegador Playwright de forma graciosa
+    if (browser) {
+        try {
+            await browser.close();
+            logToUI('[INFO] Navegador Playwright fechado com sucesso.');
+        } catch (error) {
+            logToUI(`[AVISO] Erro ao fechar o navegador Playwright: ${error.message}`);
+        } finally {
+            browser = null;
+        }
+    }
+    
+    // 3. Força o encerramento do aplicativo
+    // O app.quit() irá disparar o evento 'will-quit' naturalmente.
+    logToUI('[INFO] Todos os processos limpos. Encerrando o aplicativo.');
+    app.quit();
+});
 
 // NOVO: Handlers para salvar e carregar o login
 ipcMain.handle("get-login", () => {
