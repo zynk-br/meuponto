@@ -1,11 +1,11 @@
 const { app, BrowserWindow, ipcMain, shell } = require("electron");
-const { autoUpdater } = require("electron-updater");
 const path = require("path");
 const fs = require("fs");
 const { chromium } = require("playwright");
 const Store = require("electron-store");
 const axios = require("axios");
 const DependencyManager = require("./dependency-manager");
+const { initUpdater } = require('./updater');
 const appPackageJson = require('./package.json');
 const REPO_URL = `https://github.com/${appPackageJson.build.publish.owner}/${appPackageJson.build.publish.repo}`;
 
@@ -16,25 +16,6 @@ let mainWindow, browser, page, executionInterval, dailySchedule = [];
 // NOVA FUNÇÃO: Retorna o caminho onde o browser DEVERIA estar
 function getLocalBrowserPath() {
     return path.join(app.getPath("userData"), "browsers");
-}
-
-function setupAutoUpdater() {
-    //logToUI('[INFO] Verificando atualizações...');
-    autoUpdater.checkForUpdatesAndNotify();
-
-    autoUpdater.on("update-available", () => {
-        logToUI("[INFO] Nova atualização disponível. Baixando em segundo plano...");
-    });
-
-    autoUpdater.on("update-downloaded", () => {
-        logToUI(
-            "[SUCESSO] Atualização baixada. Ela será instalada na próxima vez que o aplicativo for reiniciado."
-        );
-    });
-
-    autoUpdater.on("error", (err) => {
-        logToUI("[ERRO] Erro no auto-updater: " + err.message);
-    });
 }
 
 // Caminho do navegador dinamicamente
@@ -185,7 +166,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
     createWindow();
-    setupAutoUpdater();
+    initUpdater(logToUI);
 });
 
 app.on("window-all-closed", () => {
