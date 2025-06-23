@@ -6,6 +6,8 @@ const { chromium } = require("playwright");
 const Store = require("electron-store");
 const axios = require("axios");
 const DependencyManager = require("./dependency-manager");
+const appPackageJson = require('./package.json');
+const REPO_URL = `https://github.com/${appPackageJson.build.publish.owner}/${appPackageJson.build.publish.repo}`;
 
 const store = new Store();
 
@@ -151,7 +153,7 @@ async function downloadBrowserHandler() {
 function createWindow() {
     mainWindow = new BrowserWindow({
         width: 900,
-        height: 750,
+        height: 765,
         frame: false,
         webPreferences: {
             preload: path.join(__dirname, "preload.js"),
@@ -267,9 +269,7 @@ ipcMain.handle("set-telegram-settings", (event, settings) => {
 ipcMain.handle("get-app-info", () => {
     // Acessa o package.json de forma segura
     const appVersion = app.getVersion();
-    const repoInfo = require("./package.json").build.publish;
-    const repoUrl = `https://github.com/${repoInfo.owner}/${repoInfo.repo}`;
-    return { version: appVersion, repoUrl };
+    return { version: appVersion, repoUrl: REPO_URL }; 
 });
 
 ipcMain.on("open-external-link", (event, url) => {
@@ -349,9 +349,10 @@ ipcMain.handle("start-automation", async (event, data) => {
         );
 
         // Passo de sincronização
-        const scrapedPunches = await syncWithWebsite();
+        // const scrapedPunches = await syncWithWebsite();
+        // setupAndRecalculateSchedule(horarios, scrapedPunches);
+        await scheduleNextValidDay(horarios);
 
-        setupAndRecalculateSchedule(horarios, scrapedPunches);
 
         return {
             success: true,
@@ -443,122 +444,253 @@ async function syncWithWebsite() {
     }
 }
 
-function setupAndRecalculateSchedule(uiHorarios, scrapedPunches) {
-    dailySchedule = []; // Reset
-    const now = new Date();
-    const dayNames = [
-        "Domingo",
-        "Segunda-Feira",
-        "Terça-Feira",
-        "Quarta-Feira",
-        "Quinta-Feira",
-        "Sexta-Feira",
-        "Sábado",
-    ];
-    const todayName = dayNames[now.getDay()];
-    const todayUISchedules = uiHorarios[todayName];
+/**
+ * Função principal que encontra o próximo dia válido e agenda o monitoramento.
+ * @param {object} uiHorarios - O objeto completo com os horários da semana vindos da UI.
+ */
+async function scheduleNextValidDay(uiHorarios) {
+    if (executionInterval) clearInterval(executionInterval);
 
-    if (!todayUISchedules || todayUISchedules.desativado) {
-        logToUI(
-            `[INFO] Dia (${todayName}) desativado no app. Nenhuma ação será tomada.`
-        );
-        return false;
+    const dayNames = ["Domingo", "Segunda-Feira", "Terça-Feira", "Quarta-Feira", "Quinta-Feira", "Sexta-Feira", "Sábado"];
+    let targetDate = null;
+    let targetSchedules = null;
+    let targetDayName = '';
+
+    // Procura pelo próximo dia válido nos próximos 7 dias
+    for (let i = 0; i < 7; i++) {
+        const dateToCheck = new Date();
+        dateToCheck.setDate(dateToCheck.getDate() + i);
+        
+        const dayName = dayNames[dateToCheck.getDay()];
+        const schedules = uiHorarios[dayName];
+        
+        // Um dia é válido se:
+        // 1. Existe uma configuração para ele.
+        // 2. Não está marcado como "desativado".
+        // 3. Tem pelo menos um horário de ponto preenchido.
+        if (schedules && !schedules.desativado && (schedules.entrada1 || schedules.saida1)) {
+            targetDate = dateToCheck;
+            targetSchedules = schedules;
+            targetDayName = dayName;
+            break; // Encontrou o dia, pode parar de procurar
+        }
     }
 
-    // 1. Monta o cronograma IDEAL com base nos dados da UI que acabaram de chegar.
+    // Se nenhum dia válido foi encontrado na semana, encerra.
+    if (!targetDate) {
+        logToUI('[AVISO] Nenhum dia útil configurado para a próxima semana. Automação em modo de espera.');
+        return;
+    }
+
+    const now = new Date();
+    const isToday = targetDate.toDateString() === now.toDateString();
+
+    if (isToday) {
+        logToUI(`[INFO] Dia de trabalho válido é hoje (${targetDayName}). Iniciando monitoramento imediato.`);
+        const punchesForToday = await syncWithWebsite();
+        processAndMonitorDay(targetSchedules, punchesForToday, targetDayName);
+    } else {
+        // Se o próximo dia válido é no futuro
+        const targetStartOfDay = new Date(targetDate);
+        targetStartOfDay.setHours(0, 0, 1, 0); // Agendado para 1 segundo após a meia-noite
+
+        const delay = targetStartOfDay.getTime() - now.getTime();
+        const delayHours = Math.floor(delay / 3600000);
+
+        logToUI(`[INFO] Próximo dia de trabalho é ${targetDayName} (${targetDate.toLocaleDateString('pt-BR')}).`);
+        logToUI(`[INFO] Automação agendada para começar em aproximadamente ${delayHours} horas. O aplicativo entrará em modo de espera.`);
+
+        // Usa setTimeout para agendar o início do processamento no futuro.
+        setTimeout(() => {
+            logToUI(`[INFO] Iniciando monitoramento agendado para ${targetDayName}.`);
+            // Como é um dia futuro, não há pontos já batidos.
+            processAndMonitorDay(targetSchedules, [], targetDayName);
+        }, delay);
+    }
+}
+
+/**
+ * Processa os horários de um dia específico, sincroniza e inicia o monitoramento.
+ * @param {object} schedulesForDay - Os horários para o dia alvo.
+ * @param {string[]} punchesForDay - Array com os pontos já batidos (se houver).
+ * @param {string} dayName - O nome do dia que está sendo processado.
+ */
+function processAndMonitorDay(schedulesForDay, punchesForDay, dayName) {
+    dailySchedule = []; // Reset
+    
+    // 1. Monta o cronograma IDEAL com base nos dados do dia.
     const scheduleKeys = ["entrada1", "saida1", "entrada2", "saida2"];
     scheduleKeys.forEach((key) => {
-        if (todayUISchedules[key]) {
-            dailySchedule.push({
-                id: key,
-                time: todayUISchedules[key],
-                punched: false,
-            });
+        if (schedulesForDay[key]) {
+            dailySchedule.push({ id: key, time: schedulesForDay[key], punched: false });
         }
     });
 
-    if (dailySchedule.length === 0) {
-        logToUI("[INFO] Nenhum horário definido na UI para hoje.");
-        return false;
-    }
+    logToUI(`[INFO] Cronograma para ${dayName}: ${dailySchedule.map(p => p.time).join(", ")}`);
 
-    logToUI(
-        `[INFO] Cronograma ideal do app (UI): ${dailySchedule
-            .map((p) => p.time)
-            .join(", ")}`
-    );
-
-    // 2. Sincroniza com os pontos já batidos
+    // 2. Sincroniza com os pontos já batidos (igual à sua lógica original)
     let lastPunchedTimeStr = null;
     let lastPunchedIndex = -1;
 
-    scrapedPunches.forEach((scrapedTime, index) => {
+    punchesForDay.forEach((scrapedTime, index) => {
         if (dailySchedule[index]) {
             dailySchedule[index].punched = true;
             dailySchedule[index].time = scrapedTime;
             lastPunchedTimeStr = scrapedTime;
             lastPunchedIndex = index;
-            logToUI(
-                `[INFO] Ponto sincronizado: ${dailySchedule[index].id} foi registrado às ${scrapedTime}.`
-            );
+            logToUI(`[INFO] Ponto sincronizado: ${dailySchedule[index].id} às ${scrapedTime}.`);
         }
     });
 
-    // 3. Recalcula os horários FUTUROS usando a lógica de DELTA
+    // 3. Recalcula os horários FUTUROS (igual à sua lógica original)
     if (lastPunchedTimeStr) {
-        logToUI(
-            `[INFO] Recalculando horários futuros com base no último ponto: ${lastPunchedTimeStr}.`
-        );
-
-        // Pega o último ponto que foi sincronizado
+        logToUI(`[INFO] Recalculando horários futuros com base no último ponto: ${lastPunchedTimeStr}.`);
         const lastPunchedPoint = dailySchedule[lastPunchedIndex];
-
-        // BUG FIX: Pega o horário IDEAL do ponto de âncora (vindo da UI), não o horário já sincronizado.
-        const idealAnchorTimeStr = todayUISchedules[lastPunchedPoint.id];
-
+        const idealAnchorTimeStr = schedulesForDay[lastPunchedPoint.id];
         const realAnchorTime = parseTime(lastPunchedTimeStr);
         const idealAnchorTime = parseTime(idealAnchorTimeStr);
-
-        // LÓGICA CORRETA: Calcula a diferença em milissegundos entre o real e o planejado.
         const delta = realAnchorTime.getTime() - idealAnchorTime.getTime();
 
-        logToUI(
-            `[INFO] Diferença calculada (delta): ${Math.round(
-                delta / 60000
-            )} minutos.`
-        );
+        logToUI(`[INFO] Diferença (delta): ${Math.round(delta / 60000)} min.`);
 
-        // Aplica o mesmo delta a todos os horários futuros
         for (let i = lastPunchedIndex + 1; i < dailySchedule.length; i++) {
             const futurePoint = dailySchedule[i];
-            const idealFutureTime = parseTime(futurePoint.time); // O "time" aqui ainda é o ideal da UI
-
+            const idealFutureTime = parseTime(futurePoint.time);
             const newTime = new Date(idealFutureTime.getTime() + delta);
             const oldTime = futurePoint.time;
             futurePoint.time = formatTime(newTime);
-
-            logToUI(
-                `[INFO] Horário de ${futurePoint.id} recalculado de ${oldTime} para ${futurePoint.time}.`
-            );
+            logToUI(`[INFO] Horário de ${futurePoint.id} ajustado de ${oldTime} para ${futurePoint.time}.`);
         }
     }
 
     // 4. Inicia o monitoramento se houver pontos futuros
     const nextPunch = dailySchedule.find((p) => !p.punched);
     if (nextPunch) {
-        logToUI(
-            `[SUCESSO] Sincronização concluída. Próximo ponto a monitorar: ${nextPunch.id} às ${nextPunch.time}.`
-        );
+        logToUI(`[SUCESSO] Sincronização concluída. Próximo ponto a monitorar: ${nextPunch.id} às ${nextPunch.time}.`);
         if (executionInterval) clearInterval(executionInterval);
-        executionInterval = setInterval(monitorAndExecutePunches, 20000);
-        return true;
+        // A função monitorAndExecutePunches agora é chamada dentro do setInterval
+        executionInterval = setInterval(monitorAndExecutePunches, 20000); 
     } else {
-        logToUI(
-            "[INFO] Sincronização concluída. Todos os pontos do dia já foram registrados."
-        );
-        return false;
+        logToUI("[INFO] Sincronização concluída. Todos os pontos do dia já foram registrados.");
     }
 }
+
+// function setupAndRecalculateSchedule(uiHorarios, scrapedPunches) {
+//     dailySchedule = []; // Reset
+//     const now = new Date();
+//     const dayNames = [
+//         "Domingo",
+//         "Segunda-Feira",
+//         "Terça-Feira",
+//         "Quarta-Feira",
+//         "Quinta-Feira",
+//         "Sexta-Feira",
+//         "Sábado",
+//     ];
+//     const todayName = dayNames[now.getDay()];
+//     const todayUISchedules = uiHorarios[todayName];
+
+//     if (!todayUISchedules || todayUISchedules.desativado) {
+//         logToUI(
+//             `[INFO] Dia (${todayName}) desativado no app. Nenhuma ação será tomada.`
+//         );
+//         return false;
+//     }
+
+//     // 1. Monta o cronograma IDEAL com base nos dados da UI que acabaram de chegar.
+//     const scheduleKeys = ["entrada1", "saida1", "entrada2", "saida2"];
+//     scheduleKeys.forEach((key) => {
+//         if (todayUISchedules[key]) {
+//             dailySchedule.push({
+//                 id: key,
+//                 time: todayUISchedules[key],
+//                 punched: false,
+//             });
+//         }
+//     });
+
+//     if (dailySchedule.length === 0) {
+//         logToUI("[INFO] Nenhum horário definido na UI para hoje.");
+//         return false;
+//     }
+
+//     logToUI(
+//         `[INFO] Cronograma ideal do app (UI): ${dailySchedule
+//             .map((p) => p.time)
+//             .join(", ")}`
+//     );
+
+//     // 2. Sincroniza com os pontos já batidos
+//     let lastPunchedTimeStr = null;
+//     let lastPunchedIndex = -1;
+
+//     scrapedPunches.forEach((scrapedTime, index) => {
+//         if (dailySchedule[index]) {
+//             dailySchedule[index].punched = true;
+//             dailySchedule[index].time = scrapedTime;
+//             lastPunchedTimeStr = scrapedTime;
+//             lastPunchedIndex = index;
+//             logToUI(
+//                 `[INFO] Ponto sincronizado: ${dailySchedule[index].id} foi registrado às ${scrapedTime}.`
+//             );
+//         }
+//     });
+
+//     // 3. Recalcula os horários FUTUROS usando a lógica de DELTA
+//     if (lastPunchedTimeStr) {
+//         logToUI(
+//             `[INFO] Recalculando horários futuros com base no último ponto: ${lastPunchedTimeStr}.`
+//         );
+
+//         // Pega o último ponto que foi sincronizado
+//         const lastPunchedPoint = dailySchedule[lastPunchedIndex];
+
+//         // BUG FIX: Pega o horário IDEAL do ponto de âncora (vindo da UI), não o horário já sincronizado.
+//         const idealAnchorTimeStr = todayUISchedules[lastPunchedPoint.id];
+
+//         const realAnchorTime = parseTime(lastPunchedTimeStr);
+//         const idealAnchorTime = parseTime(idealAnchorTimeStr);
+
+//         // LÓGICA CORRETA: Calcula a diferença em milissegundos entre o real e o planejado.
+//         const delta = realAnchorTime.getTime() - idealAnchorTime.getTime();
+
+//         logToUI(
+//             `[INFO] Diferença calculada (delta): ${Math.round(
+//                 delta / 60000
+//             )} minutos.`
+//         );
+
+//         // Aplica o mesmo delta a todos os horários futuros
+//         for (let i = lastPunchedIndex + 1; i < dailySchedule.length; i++) {
+//             const futurePoint = dailySchedule[i];
+//             const idealFutureTime = parseTime(futurePoint.time); // O "time" aqui ainda é o ideal da UI
+
+//             const newTime = new Date(idealFutureTime.getTime() + delta);
+//             const oldTime = futurePoint.time;
+//             futurePoint.time = formatTime(newTime);
+
+//             logToUI(
+//                 `[INFO] Horário de ${futurePoint.id} recalculado de ${oldTime} para ${futurePoint.time}.`
+//             );
+//         }
+//     }
+
+//     // 4. Inicia o monitoramento se houver pontos futuros
+//     const nextPunch = dailySchedule.find((p) => !p.punched);
+//     if (nextPunch) {
+//         logToUI(
+//             `[SUCESSO] Sincronização concluída. Próximo ponto a monitorar: ${nextPunch.id} às ${nextPunch.time}.`
+//         );
+//         if (executionInterval) clearInterval(executionInterval);
+//         executionInterval = setInterval(monitorAndExecutePunches, 20000);
+//         return true;
+//     } else {
+//         logToUI(
+//             "[INFO] Sincronização concluída. Todos os pontos do dia já foram registrados."
+//         );
+//         return false;
+//     }
+// }
 
 async function monitorAndExecutePunches() {
     const nextPunch = dailySchedule.find((p) => !p.punched);

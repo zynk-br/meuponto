@@ -44,8 +44,12 @@
                 <button id="btn-open-node-link">Baixar Node.js (Site Oficial)</button>
                 <p class="small-text">Após a instalação, por favor, feche e abra este aplicativo novamente.</p>
                 <h4>No MacOS</h4>
-                <p>Para instalação no MacOS, copie e cole o comando em seu terminal: <pre><code>/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"</code></pre></p>
-                <p>Após instalação do Homebrew ser concluída, rode o próximo comando: <pre><code>brew install node</code></pre></p>
+                <p>Para instalação no MacOS, copie e cole o comando em seu terminal:
+                <pre><code>/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"</code></pre>
+                </p>
+                <p>Após instalação do Homebrew ser concluída, rode o próximo comando:
+                <pre><code>brew install node</code></pre>
+                </p>
             </div>
             <!-- TELA DE LOGIN -->
             <div id="login-view" class="view-container hidden">
@@ -127,14 +131,16 @@
         </main>
 
         <footer>
-            <div id="console-wrapper">
-                <div class="console-header">
-                    <h3>Logs</h3>
+            <div id="footer-content" class="footer-container"> <!-- NOVO CONTÊINER PAI -->
+                <div id="console-wrapper">
+                    <div class="console-header">
+                        <h3>Logs</h3>
+                    </div>
+                    <div id="console" class="visible"></div>
                 </div>
-                <div id="console" class="visible"></div>
+                <!-- Display da Versão -->
+                <div id="version-display"></div>
             </div>
-            <!-- NOVO: Display da Versão -->
-            <div id="version-display"></div>
         </footer>
     </div>
     <!-- NOVO: Estrutura da Modal do Tutorial -->

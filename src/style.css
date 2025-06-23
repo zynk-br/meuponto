@@ -266,9 +266,20 @@ button.danger:hover {
 
 /* Console */
 footer {
-  position: relative; /* Cria um contexto para o posicionamento absoluto */
-  padding: 10px 25px 20px;
+  /* Mantém o fundo, mas remove o padding que agora será do contêiner interno */
+  position: relative;
   background-color: var(--bg-color);
+  padding: 20px 20px; /* Adiciona um padding geral ao rodapé */
+}
+
+.footer-container {
+  display: flex; /* ATIVA O FLEXBOX! */
+  justify-content: space-between; /* Coloca um item no início e outro no fim */
+  align-items: flex-end; /* Alinha os itens na parte de baixo */
+}
+
+#console-wrapper {
+  flex-grow: 1; /* Permite que o console cresça e ocupe o espaço */
 }
 
 .console-header {
@@ -276,6 +287,7 @@ footer {
   justify-content: space-between;
   align-items: center;
 }
+
 #toggle-console {
   background: none;
   border: 1px solid var(--text-color);
@@ -284,9 +296,9 @@ footer {
 
 #console {
   background-color: #1e2b38;
-  height: 150px;
+  height: 145px;
   overflow-y: auto;
-  padding: 10px;
+  padding: 10px 100px 10px 10px;
   border-radius: 4px;
   font-family: "Courier New", Courier, monospace;
   font-size: 0.9em;
@@ -447,11 +459,14 @@ input:checked + .slider:before {
 
 /* Display da Versão */
 #version-display {
-  position: relative; /* Remove o elemento do fluxo normal */
-  bottom: 0px; /* Posiciona a 5px da parte inferior do footer */
-  left: 813px; /* Posiciona a 15px da parte direita do footer */
+  /* REMOVE TODAS AS PROPRIEDADES DE POSICIONAMENTO ANTIGAS! */
+  /* position, bottom, left foram removidos. */
+  position: absolute;
+  bottom: 3px; /* A mesma distância do padding do footer */
+  right: 20px;  /* A mesma distância do padding do footer */
   font-size: 0.8em;
   color: #95a5a6;
+  white-space: nowrap; /* Impede que o texto quebre em duas linhas */
 }
 
 #version-display a {
@@ -459,6 +474,7 @@ input:checked + .slider:before {
   text-decoration: none;
   cursor: pointer;
 }
+
 #version-display a:hover {
   color: var(--primary-color);
 }
