@@ -40,7 +40,7 @@
     ],
     "publish": {
       "provider": "github",
-      "owner": "dgateles",
+      "owner": "zynk-br",
       "repo": "meuponto"
     },
     "win": {
