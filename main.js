@@ -6,8 +6,6 @@ const Store = require("electron-store");
 const axios = require("axios");
 const DependencyManager = require("./dependency-manager");
 const { initUpdater } = require('./updater');
-const appPackageJson = require('./package.json');
-const REPO_URL = `https://github.com/${appPackageJson.build.publish.owner}/${appPackageJson.build.publish.repo}`;
 
 const store = new Store();
 
@@ -248,9 +246,26 @@ ipcMain.handle("set-telegram-settings", (event, settings) => {
 
 // NOVO: Handle para versão do App
 ipcMain.handle("get-app-info", () => {
-    // Acessa o package.json de forma segura
     const appVersion = app.getVersion();
-    return { version: appVersion, repoUrl: REPO_URL }; 
+
+    // Em produção, o package.json é empacotado dentro do app.asar.
+    // O caminho correto para encontrá-lo é através do app.getAppPath().
+    const appPath = app.getAppPath();
+    const packageJsonPath = path.join(appPath, 'package.json');
+
+    try {
+        const packageJsonContent = fs.readFileSync(packageJsonPath, 'utf8');
+        const packageJson = JSON.parse(packageJsonContent);
+        
+        const repoInfo = packageJson.build.publish;
+        const repoUrl = `https://github.com/${repoInfo.owner}/${repoInfo.repo}`;
+        
+        return { version: appVersion, repoUrl };
+    } catch (error) {
+        console.error("Falha ao ler o package.json em produção:", error);
+        // Retorna um valor padrão ou vazio para não quebrar a UI
+        return { version: appVersion, repoUrl: '' }; 
+    }
 });
 
 ipcMain.on("open-external-link", (event, url) => {
