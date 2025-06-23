@@ -1,3 +1,4 @@
+const { app } = require("electron");
 const { exec } = require('child_process');
 const util = require('util');
 const path = require('path');
@@ -5,6 +6,49 @@ const fs = require('fs');
 const os = require('os');
 
 const execPromise = util.promisify(exec);
+
+function getLocalBrowserPath() {
+    return path.join(app.getPath("userData"), "browsers");
+}
+
+/**
+ * Encontra o caminho para o executável do Chromium.
+ * @param {boolean} throwOnError - Se deve lançar um erro em caso de falha.
+ * @returns {string} O caminho para o executável ou uma string vazia.
+ */
+function getBrowserExecutablePath(throwOnError = true) {
+    const browserPath = getLocalBrowserPath();
+    const platform = process.platform;
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+            if (!fs.existsSync(browserPath)) throw new Error("Pasta de navegadores não existe.");
+            
+            const browserFolders = fs.readdirSync(browserPath);
+            const chromiumFolder = browserFolders.find((folder) => folder.startsWith("chromium-"));
+            if (!chromiumFolder) throw new Error("Pasta específica do Chromium não encontrada.");
+
+            const executablePaths = {
+                darwin: path.join(browserPath, chromiumFolder, "chrome-mac", "Chromium.app", "Contents", "MacOS", "Chromium"),
+                win32: path.join(browserPath, chromiumFolder, "chrome-win", "chrome.exe"),
+                linux: path.join(browserPath, chromiumFolder, "chrome-linux", "chrome"),
+            };
+
+            const execPath = executablePaths[platform];
+            if (fs.existsSync(execPath)) return execPath;
+            else throw new Error(`Executável não encontrado em: ${execPath}`);
+
+        } catch (error) {
+            if (attempt === 2) {
+                if (throwOnError) throw error;
+                return "";
+            }
+             // Aguarda um pouco antes de tentar novamente
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
+        }
+    }
+    return ""; // Fallback
+}
 
 /**
  * Procura pelo executável do Node.js em vários locais padrão e retorna seu caminho absoluto.
@@ -64,7 +108,8 @@ async function findNodeExecutable() {
 /**
  * Instala o navegador Playwright usando o caminho absoluto do Node/NPX.
  */
-async function installBrowser(nodePath, browserInstallPath, logCallback) {
+async function installBrowser(nodePath, logCallback) {
+  const browserInstallPath = getLocalBrowserPath();
   if (!nodePath) {
     const errorMsg = "Caminho do Node.js não fornecido para a instalação.";
     logCallback(`[ERRO] ${errorMsg}`);
@@ -97,6 +142,7 @@ async function installBrowser(nodePath, browserInstallPath, logCallback) {
 }
 
 module.exports = {
+  getBrowserExecutablePath,
   findNodeExecutable,
   installBrowser
 };

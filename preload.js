@@ -16,6 +16,9 @@ contextBridge.exposeInMainWorld('api', {
     setSchedules: (schedules) => ipcRenderer.invoke('set-schedules', schedules),
 
     // Funções de automação
+    getAutomationStatus: () => ipcRenderer.invoke('get-automation-status'),
+    onAutomationStateChanged: (callback) => ipcRenderer.on('automation-state-changed', (event, ...args) => callback(...args)),
+    
     startAutomation: (data) => ipcRenderer.invoke('start-automation', data),
     cancelAutomation: () => ipcRenderer.send('cancel-automation'),
     onLogMessage: (callback) => ipcRenderer.on('log-message', (event, ...args) => callback(...args)),

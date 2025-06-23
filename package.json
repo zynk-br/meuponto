@@ -1,6 +1,6 @@
 {
   "name": "meuponto",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "description": "Aplicativo para automação de registro de ponto.",
   "main": "main.js",
   "scripts": {
@@ -35,7 +35,8 @@
       "preload.js",
       "dependency-manager.js",
       "updater.js",
-      "src/**/*"
+      "src/**/*",
+      "modules/**/*"
     ],
     "publish": {
       "provider": "github",
