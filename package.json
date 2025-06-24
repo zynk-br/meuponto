@@ -16,7 +16,8 @@
   "license": "ISC",
   "devDependencies": {
     "electron": "^36.4.0",
-    "electron-builder": "^26.0.12"
+    "electron-builder": "^26.0.12",
+    "electron-notarize": "^1.2.2"
   },
   "dependencies": {
     "axios": "^1.10.0",
@@ -60,6 +61,7 @@
       "icon": "images/icon.png",
       "type": "distribution",
       "hardenedRuntime": true,
+      "gatekeeperAssess": false,
       "entitlements": "assets/entitlements.mac.plist",
       "entitlementsInherit": "assets/entitlements.mac.plist"
     }
