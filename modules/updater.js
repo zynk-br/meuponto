@@ -1,42 +1,49 @@
-// updater.js
+// modules/updater.js
 
-const { autoUpdater } = require("electron-updater");
+const { app } = require('electron');
+const { updateElectronApp } = require('update-electron-app');
 
 /**
- * Inicializa o processo de auto-update do Electron.
- * @param {function(string): void} logCallback - A função a ser chamada para enviar logs para a UI.
+ * Inicializa o processo de auto-update usando o sistema integrado do Electron Forge.
+ * @param {function(string): void} logCallback - A função para enviar logs para a UI.
  */
 function initUpdater(logCallback) {
-    logCallback('[INFO] Verificando atualizações...');
-    
-    // Configura o autoUpdater para baixar automaticamente
-    autoUpdater.autoDownload = true;
-    
-    // Inicia a verificação por atualizações
-    autoUpdater.checkForUpdatesAndNotify();
+    logCallback('[INFO] Serviço de atualização iniciado.');
 
-    autoUpdater.on("update-available", (info) => {
-        logCallback(`[INFO] Nova atualização disponível (v${info.version}). Baixando em segundo plano...`);
+    // Chama a função principal do updater do Forge.
+    updateElectronApp({
+        // O repositório é pego automaticamente do package.json agora.
+        
+        // CORREÇÃO: Adicionar o método .log ao logger
+        logger: {
+            log(text)   { logCallback(`[UPDATE-LOG] ${text}`); }, // <-- ADICIONE ESTA LINHA
+            info(text)  { logCallback(`[UPDATE-INFO] ${text}`); },
+            warn(text)  { logCallback(`[UPDATE-WARN] ${text}`); }
+        },
+        
+        notifyUser: false
+    });
+    
+    const { autoUpdater } = require('electron');
+
+    autoUpdater.on('checking-for-update', () => {
+        logCallback('[INFO] Verificando por atualizações...');
     });
 
-    autoUpdater.on("update-not-available", () => {
+    autoUpdater.on('update-available', () => {
+        logCallback('[INFO] Nova atualização encontrada. O download começará em segundo plano.');
+    });
+
+    autoUpdater.on('update-not-available', () => {
         logCallback('[INFO] Você já está na versão mais recente.');
     });
 
-    autoUpdater.on("update-downloaded", () => {
-        logCallback(
-            "[SUCESSO] Atualização baixada. Ela será instalada na próxima vez que o aplicativo for reiniciado."
-        );
+    autoUpdater.on('update-downloaded', (event, releaseNotes, releaseName) => {
+        logCallback(`[SUCESSO] Atualização v${releaseName} baixada. Ela será instalada na próxima reinicialização.`);
     });
 
-    autoUpdater.on("error", (err) => {
-        logCallback(`[ERRO] Erro no auto-updater: ${err.message || 'Erro desconhecido'}`);
-    });
-    
-    autoUpdater.on('download-progress', (progressObj) => {
-        let log_message = `Baixando atualização: ${progressObj.percent.toFixed(2)}%`;
-        log_message = log_message + ` (${progressObj.transferred}/${progressObj.total})`;
-        logCallback(`[INFO] ${log_message}`);
+    autoUpdater.on('error', (error) => {
+        logCallback(`[ERRO] Erro no serviço de atualização: ${error.message}`);
     });
 }
 

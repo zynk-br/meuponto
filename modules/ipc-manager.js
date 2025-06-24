@@ -32,9 +32,14 @@ function initIpcHandlers(store) {
         try {
             const packageJsonPath = path.join(app.getAppPath(), 'package.json');
             const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-            const repoInfo = packageJson.build.publish;
-            const repoUrl = `https://github.com/${repoInfo.owner}/${repoInfo.repo}`;
-            return { version: appVersion, repoUrl };
+            const repoString = packageJson.repository;
+            if (repoString) {
+                const repoUrl = `https://github.com/${repoString}`;
+                return { version: appVersion, repoUrl };
+            } else {
+                // Fallback caso a chave 'repository' não exista.
+                return { version: appVersion, repoUrl: '' };
+            }
         } catch (error) {
             console.error("Falha ao ler o package.json em produção:", error);
             return { version: appVersion, repoUrl: '' };

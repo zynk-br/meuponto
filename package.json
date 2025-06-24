@@ -4,66 +4,34 @@
   "description": "Aplicativo para automação de registro de ponto.",
   "main": "main.js",
   "scripts": {
-    "start": "ELECTRON_ENABLE_LOGGING=true electron .",
-    "build:win": "electron-builder -w --x64 --arm64 -p always",
-    "build:mac": "electron-builder -m --x64 --arm64 -p always",
-    "build:win-local": "electron-builder -w --x64 --arm64",
-    "build:mac-local": "electron-builder -m --x64 --arm64",
-    "postinstall": "cross-env PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install --with-deps chromium"
+    "start": "electron-forge start",
+    "package": "electron-forge package",
+    "make": "electron-forge make --v",
+    "publish": "electron-forge publish"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "repository": "zynk-br/meuponto",
   "devDependencies": {
-    "electron": "^36.4.0",
-    "electron-builder": "^26.0.12",
-    "electron-notarize": "^1.2.2"
+    "@electron-forge/cli": "^7.8.1",
+    "@electron-forge/maker-deb": "^7.8.1",
+    "@electron-forge/maker-rpm": "^7.8.1",
+    "@electron-forge/maker-squirrel": "^7.8.1",
+    "@electron-forge/maker-zip": "^7.8.1",
+    "@electron-forge/plugin-auto-unpack-natives": "^7.8.1",
+    "@electron-forge/plugin-fuses": "^7.8.1",
+    "@electron-forge/publisher-github": "^7.8.1",
+    "@electron/fuses": "^1.8.0",
+    "dotenv": "^16.5.0",
+    "electron": "^36.4.0"
   },
   "dependencies": {
     "axios": "^1.10.0",
     "cross-env": "^7.0.3",
+    "electron-squirrel-startup": "^1.0.1",
     "electron-store": "7",
-    "electron-updater": "^6.6.2",
-    "playwright": "^1.53.0"
-  },
-  "build": {
-    "appId": "com.meu-ponto.app",
-    "productName": "Meu Ponto",
-    "copyright": "Copyright © 2025 Meu Ponto",
-    "afterSign": "./afterSign.js",
-    "files": [
-      "main.js",
-      "preload.js",
-      "dependency-manager.js",
-      "updater.js",
-      "src/**/*",
-      "modules/**/*"
-    ],
-    "extraResources": [
-      "./assets/**"
-    ],
-    "publish": {
-      "provider": "github",
-      "owner": "zynk-br",
-      "repo": "meuponto"
-    },
-    "win": {
-      "target": [
-        "nsis"
-      ],
-      "icon": "images/icon.ico"
-    },
-    "mac": {
-      "target": [
-        "dmg",
-        "zip"
-      ],
-      "icon": "images/icon.png",
-      "type": "distribution",
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false,
-      "entitlements": "assets/entitlements.mac.plist",
-      "entitlementsInherit": "assets/entitlements.mac.plist"
-    }
+    "playwright": "^1.53.0",
+    "update-electron-app": "^3.1.1"
   }
 }
