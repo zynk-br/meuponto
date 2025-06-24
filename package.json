@@ -38,6 +38,9 @@
       "src/**/*",
       "modules/**/*"
     ],
+    "extraResources": [
+      "./assets/**"
+    ],
     "publish": {
       "provider": "github",
       "owner": "zynk-br",
@@ -54,7 +57,11 @@
         "dmg",
         "zip"
       ],
-      "icon": "images/icon.png"
+      "icon": "images/icon.png",
+      "type": "distribution",
+      "hardenedRuntime": true,
+      "entitlements": "assets/entitlements.mac.plist",
+      "entitlementsInherit": "assets/entitlements.mac.plist"
     }
   }
 }
