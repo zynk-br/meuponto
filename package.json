@@ -12,8 +12,10 @@
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
     "build": "electron-vite build && electron-builder",
-    "build:win": "npm run build -- -w --x64 --arm64",
-    "build:mac": "npm run build -- -m --arm64",
+    "build:win": "npm run build -- -w --x64 --arm64 -p always",
+    "build:mac": "npm run build -- -m --x64 --arm64 -p always",
+    "build:win-local": "npm run build -- -w --x64 --arm64",
+    "build:mac-local": "npm run build -- -m --x64 --arm64",
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
