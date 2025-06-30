@@ -1,69 +1,81 @@
 {
-  "name": "meuponto",
-  "version": "1.0.14",
-  "description": "Aplicativo para automação de registro de ponto.",
-  "main": "main.js",
-  "scripts": {
-    "start": "ELECTRON_ENABLE_LOGGING=true electron .",
-    "build:win": "electron-builder -w --x64 --arm64 -p always",
-    "build:mac": "electron-builder -m --x64 --arm64 -p always",
-    "build:win-local": "electron-builder -w --x64 --arm64",
-    "build:mac-local": "electron-builder -m --x64 --arm64",
-    "postinstall": "cross-env PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install --with-deps chromium"
+  "name": "ponto-facil",
+  "version": "2.0.0",
+  "description": "Aplicativo para automatizar o registro de ponto",
+  "main": "./out/electron/main.js",
+  "author": {
+    "name": "Douglas Teles",
+    "email": "douglas@zynk.com.br"
   },
-  "keywords": [],
-  "author": "",
   "license": "ISC",
-  "devDependencies": {
-    "electron": "^36.4.0",
-    "electron-builder": "^26.0.12",
-    "electron-notarize": "^1.2.2"
+  "scripts": {
+    "start": "electron-vite preview",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build && electron-builder",
+    "build:win": "npm run build -- -w --x64 --arm64",
+    "build:mac": "npm run build -- -m --arm64",
+    "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
-    "axios": "^1.10.0",
-    "cross-env": "^7.0.3",
-    "electron-store": "7",
-    "electron-updater": "^6.6.2",
-    "playwright": "^1.53.0"
+    "electron-store": "8.2.0",
+    "keytar": "^7.9.0",
+    "playwright": "^1.53.2"
+  },
+  "devDependencies": {
+    "@electron-toolkit/preload": "^3.0.2",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "electron": "^37.1.0",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^3.1.0",
+    "postcss": "^8.4.38",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "tailwindcss": "^3.4.4",
+    "vite": "^5.3.1"
   },
   "build": {
-    "appId": "com.meu-ponto.app",
+    "appId": "com.zynk.meuponto",
     "productName": "Meu Ponto",
-    "copyright": "Copyright © 2025 Meu Ponto",
-    "afterSign": "./afterSign.js",
+    "copyright": "Copyright © 2025 ${author}",
+    "directories": {
+      "output": "release/",
+      "buildResources": "assets/build"
+    },
     "files": [
-      "main.js",
-      "preload.js",
-      "dependency-manager.js",
-      "updater.js",
-      "src/**/*",
-      "modules/**/*"
+      "out/**",
+      "package.json"
     ],
-    "extraResources": [
-      "./assets/**"
-    ],
-    "publish": {
-      "provider": "github",
-      "owner": "zynk-br",
-      "repo": "meuponto"
-    },
-    "win": {
-      "target": [
-        "nsis"
-      ],
-      "icon": "images/icon.ico"
-    },
     "mac": {
+      "icon": "assets/build/icon.png",
       "target": [
         "dmg",
         "zip"
       ],
-      "icon": "images/icon.png",
-      "type": "distribution",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
-      "entitlements": "assets/entitlements.mac.plist",
-      "entitlementsInherit": "assets/entitlements.mac.plist"
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "dmg": {
+      "sign": false
+    },
+    "win": {
+      "icon": "assets/build/icon.png",
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
     }
   }
 }

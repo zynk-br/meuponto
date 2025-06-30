@@ -1,0 +1,34 @@
+<!-- Arquivo agora em: src/renderer/index.html -->
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8"> <!-- Corrigido para UTF-8 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- 
+      CSP para Electron com Vite:
+      default-src 'self': Permite carregar recursos da mesma origem.
+      script-src 'self': Permite scripts da mesma origem. Vite lida com injeções de script em dev.
+                 'wasm-unsafe-eval': Pode ser necessário para algumas dependências que usam WebAssembly.
+                 'unsafe-eval': Necessário para Vite HMR em desenvolvimento. Remova ou restrinja para produção se possível.
+      style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com: 
+                 Permite estilos da mesma origem, inline (Vite HMR ou Tailwind JIT podem usar) e FontAwesome.
+      font-src 'self' https://cdnjs.cloudflare.com: Permite fontes da mesma origem e FontAwesome.
+      img-src 'self' data:: Permite imagens da mesma origem e data URIs.
+      connect-src 'self' http://localhost:*: Conexão com o servidor de desenvolvimento Vite.
+    -->
+    <meta http-equiv="Content-Security-Policy" 
+          content="default-src 'self'; 
+                   script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; 
+                   style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; 
+                   font-src 'self' https://cdnjs.cloudflare.com; 
+                   img-src 'self' data:;
+                   connect-src 'self' http://localhost:* ws://localhost:*; object-src 'none';">
+    <title>Meu Ponto - Automatizador</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="./index.css"> <!-- CSS global com Tailwind -->
+</head>
+<body class="bg-secondary-100 dark:bg-secondary-900 text-secondary-900 dark:text-secondary-100 antialiased">
+    <div id="root"></div>
+    <script type="module" src="./index.tsx"></script> <!-- Vite processará este entry point -->
+</body>
+</html>
