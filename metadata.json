@@ -1,0 +1,5 @@
+{
+  "name": "Meu Ponto - Automatizador",
+  "description": "Aplicativo para automatizar o registro de ponto no site centraldofuncionario.com.br, com modos manual e semi-automático, e console de logs integrado.",
+  "requestFramePermissions": []
+}

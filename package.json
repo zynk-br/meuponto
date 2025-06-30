@@ -1,0 +1,81 @@
+{
+  "name": "ponto-facil",
+  "version": "2.0.0",
+  "description": "Aplicativo para automatizar o registro de ponto",
+  "main": "./out/electron/main.js",
+  "author": {
+    "name": "Douglas Teles",
+    "email": "douglas@zynk.com.br"
+  },
+  "license": "ISC",
+  "scripts": {
+    "start": "electron-vite preview",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build && electron-builder",
+    "build:win": "npm run build -- -w --x64 --arm64",
+    "build:mac": "npm run build -- -m --arm64",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "dependencies": {
+    "electron-store": "8.2.0",
+    "keytar": "^7.9.0",
+    "playwright": "^1.53.2"
+  },
+  "devDependencies": {
+    "@electron-toolkit/preload": "^3.0.2",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "electron": "^37.1.0",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^3.1.0",
+    "postcss": "^8.4.38",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "tailwindcss": "^3.4.4",
+    "vite": "^5.3.1"
+  },
+  "build": {
+    "appId": "com.zynk.meuponto",
+    "productName": "Meu Ponto",
+    "copyright": "Copyright © 2025 ${author}",
+    "directories": {
+      "output": "release/",
+      "buildResources": "assets/build"
+    },
+    "files": [
+      "out/**",
+      "package.json"
+    ],
+    "mac": {
+      "icon": "assets/build/icon.png",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "dmg": {
+      "sign": false
+    },
+    "win": {
+      "icon": "assets/build/icon.png",
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}
