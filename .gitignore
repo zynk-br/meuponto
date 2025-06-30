@@ -1,3 +1,8 @@
 node_modules
 dist
 .env
+.env.local
+build.sh
+certificate.p12
+out
+release
