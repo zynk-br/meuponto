@@ -31,7 +31,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Automation Control
   startAutomation: (data) => ipcRenderer.send('start-automation', data), // data: { schedule, credentials, settings }
   stopAutomation: () => ipcRenderer.send('stop-automation'),
-  
+
   // Listeners for Main Process Events
   onLogFromMain: (callback) => {
     const handler = (_event, logEntry) => callback(logEntry);
@@ -47,4 +47,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeListener('automation-status-update', handler);
     };
   },
+
+  // ===============================================
+  // NOVOS MÉTODOS E LISTENERS DE ATUALIZAÇÃO
+  // ===============================================
+  downloadUpdate: () => ipcRenderer.send('download-update'),
+  installUpdate: () => ipcRenderer.send('install-update'),
+
+  onUpdateAvailable: (callback) => {
+    const handler = (event, info) => callback(info);
+    ipcRenderer.on('update-available', handler);
+    return () => ipcRenderer.removeListener('update-available', handler);
+  },
+  onUpdateProgress: (callback) => {
+    const handler = (event, progress) => callback(progress);
+    ipcRenderer.on('update-download-progress', handler);
+    return () => ipcRenderer.removeListener('update-download-progress', handler);
+  },
+  onUpdateDownloaded: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('update-downloaded', handler);
+    return () => ipcRenderer.removeListener('update-downloaded', handler);
+  }
 });

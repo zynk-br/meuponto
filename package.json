@@ -1,11 +1,12 @@
 {
-  "name": "ponto-facil",
-  "version": "2.0.0",
-  "description": "Aplicativo para automatizar o registro de ponto",
+  "name": "meu-ponto",
+  "version": "2.0.1",
+  "description": "Automatizador de ponto",
   "main": "./out/electron/main.js",
   "author": {
-    "name": "Douglas Teles",
-    "email": "douglas@zynk.com.br"
+    "name": "Zynk Tech",
+    "email": "douglas@zynk.com.br",
+    "url": "https://zynk.com.br"
   },
   "license": "ISC",
   "scripts": {
@@ -20,6 +21,7 @@
   },
   "dependencies": {
     "electron-store": "8.2.0",
+    "electron-updater": "^6.6.2",
     "keytar": "^7.9.0",
     "playwright": "^1.53.2"
   },
@@ -51,6 +53,11 @@
       "out/**",
       "package.json"
     ],
+    "publish": {
+      "provider": "github",
+      "owner": "zynk-br",
+      "repo": "meuponto"
+    },
     "mac": {
       "icon": "assets/build/icon.png",
       "target": [

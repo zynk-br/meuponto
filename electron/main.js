@@ -5,9 +5,10 @@ const Store = require('electron-store');
 const keytar = require('keytar');
 const { expect } = require('playwright/test');
 const https = require('https');
+const { autoUpdater } = require('electron-updater');
 
 const store = new Store();
-const KEYTAR_SERVICE_NAME = 'PontoFacilAutomatizado';
+const KEYTAR_SERVICE_NAME = 'MeuPontoAutomatizado';
 
 let mainWindow;
 let playwrightBrowser;
@@ -19,6 +20,8 @@ const RETRY_INTERVAL = 2000;
 const CINCO_MINUTOS = 5 * 60 * 1000;
 const UM_MINUTO = 60 * 1000;
 const CINCO_SEGUNDOS = 5 * 1000;
+autoUpdater.autoDownload = false; // MUITO IMPORTANTE: Desativa o download automático.
+autoUpdater.autoInstallOnAppQuit = true; // Instala na próxima vez que o app for fechado.
 
 // --- Helper Functions ---
 function logToRenderer(level, message) {
@@ -48,7 +51,7 @@ ipcMain.handle('get-credential', async (event, account) => {
   try {
     return await keytar.getPassword(KEYTAR_SERVICE_NAME, account);
   } catch (error) {
-    logToRenderer('ERRO', `Error getting credential for ${account}: ${error.message}`);
+    logToRenderer('ERRO', `Erro ao obter credenciais para ${account}: ${error.message}`);
     return null;
   }
 });
@@ -56,9 +59,9 @@ ipcMain.handle('get-credential', async (event, account) => {
 ipcMain.on('set-credential', async (event, { account, password }) => {
   try {
     await keytar.setPassword(KEYTAR_SERVICE_NAME, account, password);
-    logToRenderer('INFO', `Credential saved for ${account}.`);
+    logToRenderer('INFO', `Credencial salva para ${account}.`);
   } catch (error) {
-    logToRenderer('ERRO', `Error saving credential for ${account}: ${error.message}`);
+    logToRenderer('ERRO', `Erro ao salvar credenciais para ${account}: ${error.message}`);
   }
 });
 
@@ -126,7 +129,7 @@ ipcMain.on('reinstall-automation-browser', async () => {
 // --- Telegram Notification ---
 async function sendTelegramNotification(token, chatId, message) {
   if (!token || !chatId) {
-    logToRenderer('AVISO', 'Telegram token or chat ID not configured. Skipping notification.');
+    logToRenderer('AVISO', 'Token ou ID do Telegram não foi fornecido. Pulando notificação.');
     return;
   }
   const url = `https://api.telegram.org/bot${token}/sendMessage`;
@@ -172,7 +175,7 @@ let nextPunchTimer = null;
 
 async function runAutomationStep(stepFunction, ...args) {
   if (!automationIsRunning) {
-    logToRenderer('INFO', 'Automation was stopped, skipping step.');
+    logToRenderer('INFO', 'A automação foi cancelada, pulando passo.');
     return { success: false, critical: false, stopRequest: true };
   }
   try {
@@ -180,15 +183,15 @@ async function runAutomationStep(stepFunction, ...args) {
     automationCurrentRetries = 0;
     return { success: true, data: result }; // Pass data back
   } catch (error) {
-    logToRenderer('ERRO', `Automation step failed: ${error.message}`);
+    logToRenderer('ERRO', `O passo da automação falhou: ${error.message}`);
     automationCurrentRetries++;
     if (automationCurrentRetries > MAX_RETRIES) {
-      logToRenderer('ERRO', `Max retries reached for step. Stopping automation.`);
+      logToRenderer('ERRO', `Máximo de tentativas alcançado. Parando automação.`);
       updateAutomationStatusInRenderer('Erro crítico, automação parada.', 'Falha Max. Tentativas');
       await stopAutomationLogic();
       return { success: false, critical: true };
     } else {
-      logToRenderer('AVISO', `Retrying step (${automationCurrentRetries}/${MAX_RETRIES})...`);
+      logToRenderer('AVISO', `tentando novamente (${automationCurrentRetries}/${MAX_RETRIES})...`);
       updateAutomationStatusInRenderer(`Falha, tentando novamente (${automationCurrentRetries}/${MAX_RETRIES})...`, error.message.substring(0, 50));
       await new Promise(resolve => setTimeout(resolve, RETRY_INTERVAL * automationCurrentRetries));
       return runAutomationStep(stepFunction, ...args);
@@ -199,19 +202,19 @@ async function runAutomationStep(stepFunction, ...args) {
 
 async function launchPlaywright() {
   if (playwrightBrowser) return playwrightBrowser;
-  logToRenderer('INFO', 'Launching Playwright browser...');
+  logToRenderer('INFO', 'Iniciando navegador de automação...');
   updateAutomationStatusInRenderer('Iniciando navegador de automação...');
   try {
     const playwright = require('playwright');
     playwrightBrowser = await playwright.chromium.launch({ headless: true }); // Alterado para true por padrão para produção
-    logToRenderer('SUCESSO', 'Playwright browser launched.');
+    logToRenderer('SUCESSO', 'Playwright browser iniciado.');
     return playwrightBrowser;
   } catch (launchError) {
-    logToRenderer('ERRO', `Failed to launch Playwright browser: ${launchError.message}`);
+    logToRenderer('ERRO', `Falha ao iniciar Playwright browser: ${launchError.message}`);
     // Se o erro específico de executável ausente ocorrer, atualize o status do navegador para o renderer.
-    if (launchError.message.includes("Executable doesn't exist")) {
-      logToRenderer('ERRO', "Playwright browser executable is missing. Forcing status update to MISSING.");
-      if (mainWindow) mainWindow.webContents.send('update-browser-status-from-main', 'MISSING');
+    if (launchError.message.includes("Executável não existe")) {
+      logToRenderer('ERRO', "O executável do Playwright browser não foi encontrado. Forçando estatus de atualização para FALTANDO.");
+      if (mainWindow) mainWindow.webContents.send('update-browser-status-from-main', 'FALTANDO');
     }
     throw launchError; // Re-throw para ser pego pelo startAutomation
   }
@@ -219,14 +222,14 @@ async function launchPlaywright() {
 
 async function closePlaywright() {
   if (playwrightBrowser) {
-    logToRenderer('INFO', 'Closing Playwright browser...');
+    logToRenderer('INFO', 'Fechando Playwright browser...');
     try {
       await playwrightBrowser.close();
     } catch (closeError) {
-      logToRenderer('AVISO', `Error closing Playwright browser: ${closeError.message}. May already be closed or unresponsive.`);
+      logToRenderer('AVISO', `Erro ao fechar Playwright browser: ${closeError.message}. Já pode estar fechado ou não está respondendo.`);
     } finally {
       playwrightBrowser = null;
-      logToRenderer('INFO', 'Playwright browser instance cleared.');
+      logToRenderer('INFO', 'Instância do Playwright browser finalizada.');
     }
   }
 }
@@ -259,9 +262,9 @@ async function loginToPortal(page, folha, senha) {
 
   try {
     await page.waitForURL('**/incluir-ponto', { timeout: 10000 });
-    logToRenderer('SUCESSO', 'Login successful.');
+    logToRenderer('SUCESSO', 'Logado com sucesso.');
   } catch (e) {
-    logToRenderer('ERRO', 'Login failed. Could not verify dashboard navigation.');
+    logToRenderer('ERRO', 'Falha no login. Não foi possível verificar a navegação no painel.');
     if (page && !page.isClosed()) {
       try {
         const screenshotPath = `error_login_${Date.now()}.png`;
@@ -271,7 +274,7 @@ async function loginToPortal(page, folha, senha) {
         logToRenderer('ERRO', `Failed to take screenshot during login error: ${ssError.message}`);
       }
     }
-    throw new Error('Login failed: Dashboard not reached.');
+    throw new Error('Falha no login: o painel não respondeu.');
   }
 }
 
@@ -356,7 +359,7 @@ function getNextPunch(currentSchedule, existingPoints) {
     currentDayIndex = now.getDay(); // 0 (Sun) - 6 (Sat)
   }
 
-    // Mapeia chaves normalizadas para as chaves originais para eficiência
+  // Mapeia chaves normalizadas para as chaves originais para eficiência
   const scheduleKeyMap = Object.keys(currentSchedule).reduce((map, key) => {
     const normalizedKey = key.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     map[normalizedKey] = key;
@@ -703,6 +706,20 @@ function stopNoSleep() {
 app.whenReady().then(() => {
   startNoSleep();
   createWindow();
+  // ===============================================
+  // LÓGICA DO AUTO-UPDATER
+  // ===============================================
+  // Após a janela ser criada, verifique por atualizações.
+  // Não use checkForUpdatesAndNotify() pois ele mostra uma notificação nativa.
+  // Queremos controle total da UI.
+  autoUpdater.checkForUpdates();
+
+  // Adicione um log para o updater
+  autoUpdater.logger = {
+    info: (msg) => logToRenderer('INFO', `[Updater] ${msg}`),
+    warn: (msg) => logToRenderer('AVISO', `[Updater] ${msg}`),
+    error: (msg) => logToRenderer('ERRO', `[Updater] ${msg}`),
+  };
 });
 
 app.on('window-all-closed', () => {
@@ -741,7 +758,64 @@ process.on('uncaughtException', (error, origin) => {
   if (app && dialog && app.isPackaged) {
     dialog.showErrorBox('Erro Crítico Inesperado', message);
   }
-  
+
   // É importante encerrar o processo após um erro não tratado para evitar estado instável.
-  process.exit(1); 
+  process.exit(1);
+});
+
+// ===============================================
+// LISTENERS DE EVENTOS DO AUTO-UPDATER
+// ===============================================
+
+// Evento: Nova atualização encontrada.
+autoUpdater.on('update-available', (info) => {
+  logToRenderer('SUCESSO', `Nova versão encontrada: ${info.version}`);
+  // Envia a informação para a UI para mostrar a notificação.
+  if (mainWindow) {
+    mainWindow.webContents.send('update-available', info);
+  }
+});
+
+// Evento: Nenhuma atualização encontrada.
+autoUpdater.on('update-not-available', () => {
+  logToRenderer('INFO', 'Nenhuma nova atualização disponível.');
+});
+
+// Evento: Erro durante a atualização.
+autoUpdater.on('error', (err) => {
+  logToRenderer('ERRO', `Erro no auto-updater: ${err.message}`);
+});
+
+// Evento: Progresso do download.
+autoUpdater.on('download-progress', (progressObj) => {
+  const logMessage = `Velocidade: ${Math.round(progressObj.bytesPerSecond / 1024)} KB/s - Baixado ${Math.round(progressObj.percent)}% (${Math.round(progressObj.transferred / 1024)}/${Math.round(progressObj.total / 1024)} KB)`;
+  // Envia o progresso para a UI para atualizar a barra.
+  if (mainWindow) {
+    mainWindow.webContents.send('update-download-progress', progressObj);
+  }
+});
+
+// Evento: Download da atualização concluído.
+autoUpdater.on('update-downloaded', (info) => {
+  logToRenderer('SUCESSO', `Versão ${info.version} baixada. Pronta para instalar.`);
+  // Envia para a UI para mostrar o botão "Reiniciar e Instalar".
+  if (mainWindow) {
+    mainWindow.webContents.send('update-downloaded');
+  }
+});
+
+// ===============================================
+// HANDLERS IPC PARA AÇÕES DO USUÁRIO
+// ===============================================
+
+// Usuário clicou no botão "Baixar"
+ipcMain.on('download-update', () => {
+  logToRenderer('INFO', 'Usuário iniciou o download da atualização.');
+  autoUpdater.downloadUpdate();
+});
+
+// Usuário clicou no botão "Reiniciar e Instalar"
+ipcMain.on('install-update', () => {
+  logToRenderer('INFO', 'Usuário iniciou a instalação da atualização.');
+  autoUpdater.quitAndInstall();
 });

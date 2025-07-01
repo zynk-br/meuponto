@@ -92,6 +92,13 @@ export interface ElectronAPI {
 
   onLogFromMain: (callback: (logEntry: {level: LogLevel, message: string}) => void) => () => void;
   onAutomationStatusUpdate: (callback: (statusUpdate: AutomationState) => void) => () => void;
+
+  // Novas funções de atualização
+  downloadUpdate: () => void;
+  installUpdate: () => void;
+  onUpdateAvailable: (callback: (info: { version: string }) => void) => () => void;
+  onUpdateProgress: (callback: (progress: { percent: number }) => void) => () => void;
+  onUpdateDownloaded: (callback: () => void) => () => void;
 }
 
 // Estendendo a interface Window global para TypeScript reconhecer window.electronAPI

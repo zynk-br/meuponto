@@ -8,6 +8,7 @@ import Header from './components/Header'; // Ajustado
 import LogConsole from './components/LogConsole'; // Ajustado
 import SettingsModal from './components/SettingsModal'; // Ajustado
 import TelegramTutorialModal from './components/TelegramTutorialModal'; // Ajustado
+import UpdateNotification from './components/UpdateNotification';
 
 import LoadingView from './views/LoadingView'; // Ajustado
 import NodeMissingView from './views/NodeMissingView'; // Ajustado
@@ -47,6 +48,7 @@ const AppContent: React.FC = () => {
       <LogConsole isVisible={settings.showLogConsole} />
       <SettingsModal />
       <TelegramTutorialModal />
+      <UpdateNotification />
     </div>
   );
 };
