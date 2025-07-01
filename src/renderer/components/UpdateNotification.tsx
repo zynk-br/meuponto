@@ -1,5 +1,6 @@
 // src/renderer/components/UpdateNotification.tsx
 import React, { useState, useEffect } from 'react';
+import { APP_TITLE } from '../constants';
 
 const UpdateNotification: React.FC = () => {
   const [isVisible, setIsVisible] = useState(false);
@@ -83,7 +84,7 @@ const UpdateNotification: React.FC = () => {
             <p className="text-xs text-center">{Math.round(downloadProgress)}%</p>
           </>
         ) : (
-          <p>Uma nova versão ({updateInfo?.version}) do {app.productName} está disponível.</p>
+          <p>Uma nova versão do {APP_TITLE} está disponível: ({updateInfo?.version})</p>
         )}
       </div>
 
