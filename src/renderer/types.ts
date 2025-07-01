@@ -27,7 +27,6 @@ export enum BrowserStatus {
 }
 
 export interface Settings {
-  telegramToken: string;
   telegramChatId: string;
   showLogConsole: boolean;
   automationBrowserStatus: BrowserStatus;

@@ -1,5 +1,6 @@
 // Arquivo agora em: electron/main.js
 const { app, BrowserWindow, ipcMain, dialog, Notification, powerSaveBlocker } = require('electron');
+const fs = require('fs');
 const path = require('path');
 const Store = require('electron-store');
 const keytar = require('keytar');
@@ -9,6 +10,7 @@ const { autoUpdater } = require('electron-updater');
 
 const store = new Store();
 const KEYTAR_SERVICE_NAME = 'MeuPontoAutomatizado';
+const TELEGRAM_BOT_TOKEN = '7391147858:AAFt8DP14NgxZin3Bgr9i5q2FZO1-i7gcAk';
 
 let mainWindow;
 let playwrightBrowser;
@@ -20,6 +22,7 @@ const RETRY_INTERVAL = 2000;
 const CINCO_MINUTOS = 5 * 60 * 1000;
 const UM_MINUTO = 60 * 1000;
 const CINCO_SEGUNDOS = 5 * 1000;
+
 autoUpdater.autoDownload = false; // MUITO IMPORTANTE: Desativa o download automático.
 autoUpdater.autoInstallOnAppQuit = true; // Instala na próxima vez que o app for fechado.
 
@@ -98,10 +101,33 @@ ipcMain.on('reinstall-automation-browser', async () => {
   if (mainWindow) mainWindow.webContents.send('update-browser-status-from-main', 'LOADING');
 
   try {
-    const exec = require('child_process').exec;
+    const { exec } = require('child_process');
+
+    // =======================================================
+    // CORREÇÃO CRÍTICA
+    // =======================================================
+    const playwrightCliPath = path.resolve(
+      app.getAppPath(),
+      '..',
+      'app.asar.unpacked', // A pasta onde o asarUnpack coloca os arquivos
+      'node_modules',
+      'playwright',
+      'cli.js'
+    );
+    
+    // Verificar se o script realmente existe antes de tentar executá-lo.
+    if (!fs.existsSync(playwrightCliPath)) {
+        throw new Error(`CLI do Playwright não encontrado em ${playwrightCliPath}. Verifique a configuração 'asarUnpack' no package.json.`);
+    }
+
+    // Construir o comando usando o Node.js interno do Electron (process.execPath)
+    // Isso evita completamente a dependência do 'npx' ou de uma instalação global do Node.
+    const command = `"${process.execPath}" "${playwrightCliPath}" install chromium --with-deps`;
+    // =======================================================
+    
+    logToRenderer('INFO', `Executando instalação: ${command}`);
+
     await new Promise((resolve, reject) => {
-      const command = `npx playwright install chromium --with-deps`;
-      logToRenderer('INFO', `Executando: ${command}`);
       exec(command, (error, stdout, stderr) => {
         if (error) {
           logToRenderer('ERRO', `Playwright install error: ${stderr || error.message}`);
@@ -128,8 +154,8 @@ ipcMain.on('reinstall-automation-browser', async () => {
 
 // --- Telegram Notification ---
 async function sendTelegramNotification(token, chatId, message) {
-  if (!token || !chatId) {
-    logToRenderer('AVISO', 'Token ou ID do Telegram não foi fornecido. Pulando notificação.');
+  if (!chatId) {
+    logToRenderer('AVISO', 'Chat ID do Telegram não foi fornecido. Pulando notificação.');
     return;
   }
   const url = `https://api.telegram.org/bot${token}/sendMessage`;
@@ -467,9 +493,9 @@ async function performPunch(page, punchDetails) {
     logToRenderer('SUCESSO', `Ponto ${punchDetails.type} registrado com sucesso.`);
     try {
       await sendTelegramNotification(
-        currentAutomationSettings.telegramToken,
+        TELEGRAM_BOT_TOKEN,
         currentAutomationSettings.telegramChatId,
-        `🫆 Batida ${punchDetails.type} (${punchDetails.time}) registrada com sucesso! ✅`
+        `Batida ${punchDetails.type} às ${punchDetails.time} registrada com sucesso! ✅`
       );
     } catch (err) {
       logToRenderer('ERRO', `Falha ao enviar notificação Telegram: ${err.message}`);

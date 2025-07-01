@@ -2,7 +2,6 @@
 import { Settings, BrowserStatus, View, DayOfWeek, TimeEntry, Schedule, LogLevel, AutomationMode } from './types'; // Ajustado
 
 export const INITIAL_SETTINGS: Settings = {
-  telegramToken: '',
   telegramChatId: '',
   showLogConsole: true,
   automationBrowserStatus: BrowserStatus.LOADING, 

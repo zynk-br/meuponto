@@ -1,6 +1,6 @@
 {
   "name": "meu-ponto",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Automatizador de ponto",
   "main": "./out/electron/main.js",
   "author": {
@@ -49,6 +49,11 @@
       "output": "release/",
       "buildResources": "assets/build"
     },
+    "asarUnpack": [
+      "**/node_modules/playwright/**",
+      "**/node_modules/playwright-core/**",
+      "**/node_modules/keytar/**"
+    ],
     "files": [
       "out/**",
       "package.json"

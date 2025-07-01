@@ -98,20 +98,6 @@ const SettingsModal: React.FC = () => {
           <h3 className="text-lg font-semibold mb-3 text-primary-600 dark:text-primary-400">Notificações do Telegram</h3>
           <div className="space-y-3">
             <div>
-              <label htmlFor="telegramToken" className="block text-sm font-medium text-secondary-700 dark:text-secondary-300">
-                Token do Bot
-              </label>
-              <input
-                type="password"
-                name="telegramToken"
-                id="telegramToken"
-                value={localSettings.telegramToken}
-                onChange={handleInputChange}
-                className="mt-1 block w-full px-3 py-2 bg-white dark:bg-secondary-700 border border-secondary-300 dark:border-secondary-600 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
-                placeholder="Seu token do BotFather"
-              />
-            </div>
-            <div>
               <label htmlFor="telegramChatId" className="block text-sm font-medium text-secondary-700 dark:text-secondary-300">
                 Chat ID do Usuário
               </label>
@@ -129,7 +115,7 @@ const SettingsModal: React.FC = () => {
               onClick={() => setIsTelegramTutorialModalOpen(true)}
               className="text-sm text-primary-600 hover:text-primary-800 dark:text-primary-400 dark:hover:text-primary-200 flex items-center"
             >
-              <i className="fas fa-question-circle mr-2"></i> Como obter o Token e Chat ID?
+              <i className="fas fa-question-circle mr-2"></i> Como obter o Chat ID?
             </button>
           </div>
         </div>
