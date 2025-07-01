@@ -114,17 +114,17 @@ ipcMain.on('reinstall-automation-browser', async () => {
       'playwright',
       'cli.js'
     );
-    
+
     // Verificar se o script realmente existe antes de tentar executá-lo.
     if (!fs.existsSync(playwrightCliPath)) {
-        throw new Error(`CLI do Playwright não encontrado em ${playwrightCliPath}. Verifique a configuração 'asarUnpack' no package.json.`);
+      throw new Error(`CLI do Playwright não encontrado em ${playwrightCliPath}. Verifique a configuração 'asarUnpack' no package.json.`);
     }
 
     // Construir o comando usando o Node.js interno do Electron (process.execPath)
     // Isso evita completamente a dependência do 'npx' ou de uma instalação global do Node.
     const command = `"${process.execPath}" "${playwrightCliPath}" install chromium --with-deps`;
     // =======================================================
-    
+
     logToRenderer('INFO', `Executando instalação: ${command}`);
 
     await new Promise((resolve, reject) => {
@@ -472,39 +472,69 @@ function getNextPunch(currentSchedule, existingPoints) {
 }
 
 async function performPunch(page, punchDetails) {
-  logToRenderer('INFO', `Registrando ponto: ${punchDetails.day} - ${punchDetails.type} às ${punchDetails.time}`);
+  logToRenderer('INFO', `Tentando registrar ponto: ${punchDetails.day} - ${punchDetails.type} às ${punchDetails.time}`);
   updateAutomationStatusInRenderer(`Registrando ${punchDetails.type}...`);
 
-  const clickSuccess = await page.locator('#localizacao-incluir-ponto').click({ timeout: 15000 }).then(() => true).catch(async (err) => {
-    logToRenderer('AVISO', `Falha ao clicar em #localizacao-incluir-ponto: ${err.message}.`);
-    if (page && !page.isClosed()) {
-      try {
-        const screenshotPath = `error_click_punch_${Date.now()}.png`;
-        await page.screenshot({ path: screenshotPath });
-        logToRenderer('DEBUG', `Screenshot tirada: ${screenshotPath}`);
-      } catch (ssError) {
-        logToRenderer('ERRO', `Falha ao tirar screenshot: ${ssError.message}`);
-      }
-    }
-    throw new Error('Falha ao clicar em incluir ponto.');
-  });
+  // 1. Clicar no botão para registrar o ponto
+  await page.locator('#localizacao-incluir-ponto').click({ timeout: 15000 });
 
-  if (clickSuccess) {
-    logToRenderer('SUCESSO', `Ponto ${punchDetails.type} registrado com sucesso.`);
+  // 2. AGUARDAR a página reagir e processar o clique.
+  //    'networkidle' espera até que não haja mais tráfego de rede por 500ms.
+  //    Isso dá tempo para a lista de pontos ser atualizada via AJAX.
+  logToRenderer('DEBUG', 'Aguardando a página processar o clique...');
+  try {
+    await page.waitForLoadState('networkidle', { timeout: 10000 });
+  } catch (e) {
+    logToRenderer('AVISO', 'Timeout aguardando networkidle. A verificação continuará, mas pode ser instável.');
+  }
+
+  // 3. VERIFICAR o resultado: resincronize a lista de pontos da página.
+  logToRenderer('INFO', 'Verificando se o ponto foi registrado com sucesso...');
+  const updatedPoints = await syncInitialPoints(page); // Usa sua função já existente!
+
+  // 4. Checa se a batida que tentamos fazer agora existe na nova lista.
+  const punchWasSuccessful = updatedPoints.includes(punchDetails.time);
+
+  if (punchWasSuccessful) {
+    // SÓ AGORA podemos considerar um sucesso real.
+    logToRenderer('SUCESSO', `Ponto ${punchDetails.type} (${punchDetails.time}) registrado e VERIFICADO com sucesso.`);
     try {
       await sendTelegramNotification(
         TELEGRAM_BOT_TOKEN,
         currentAutomationSettings.telegramChatId,
-        `Batida ${punchDetails.type} às ${punchDetails.time} registrada com sucesso! ✅`
+        `Ponto ${punchDetails.type} às ${punchDetails.time} registrado com sucesso! 🟢`
       );
     } catch (err) {
-      logToRenderer('ERRO', `Falha ao enviar notificação Telegram: ${err.message}`);
+      logToRenderer('AVISO', `Falha ao enviar notificação Telegram: ${err.message}`);
     }
-    return 'success';
-  }
-  return 'failed';
-}
+    return 'success'; // Retorna sucesso para a lógica de automação.
+  } else {
+    // O clique aconteceu, mas o ponto não apareceu. ISTO é uma falha real.
+    logToRenderer('ERRO', `Falha ao registrar ponto ${punchDetails.type} (${punchDetails.time}). O clique ocorreu, mas a batida não apareceu na lista.`);
 
+    // Tira um screenshot para ajudar na depuração do que pode ter acontecido.
+    try {
+      const screenshotPath = `error_verification_failed_${Date.now()}.png`;
+      await page.screenshot({ path: path.join(app.getPath('userData'), screenshotPath) });
+      logToRenderer('DEBUG', `Screenshot da falha de verificação salvo em: ${screenshotPath}`);
+    } catch (ssError) {
+      logToRenderer('ERRO', `Falha ao tirar screenshot da falha de verificação: ${ssError.message}`);
+    }
+
+    try {
+      await sendTelegramNotification(
+        TELEGRAM_BOT_TOKEN,
+        currentAutomationSettings.telegramChatId,
+        `Falha ao registrar ponto ${punchDetails.type} às ${punchDetails.time} 🔴 Verifique e faça o registro manualmente!`
+      );
+    } catch (err) {
+      logToRenderer('AVISO', `Falha ao enviar notificação Telegram: ${err.message}`);
+    }
+
+    // Lança um erro para que a lógica de retry em 'runAutomationStep' seja acionada.
+    throw new Error(`Verificação pós-batida falhou para o horário ${punchDetails.time}.`);
+  }
+}
 
 function scheduleNextAutomationHeartbeat(nextPunch) {
 
