@@ -7,6 +7,7 @@ const keytar = require('keytar');
 const { expect } = require('playwright/test');
 const https = require('https');
 const { autoUpdater } = require('electron-updater');
+const { exec } = require('child_process');
 
 const store = new Store();
 const KEYTAR_SERVICE_NAME = 'MeuPontoAutomatizado';
