@@ -84,7 +84,7 @@ ipcMain.on('delete-credential', async (event, account) => {
 // --- Automation Browser Management (Playwright) ---
 async function checkPlaywrightBrowser() {
   logToRenderer('INFO', 'Iniciando verificação do navegador de automação (Playwright)...');
-  
+
   try {
     const playwright = require('playwright');
     // A função executablePath() é a primeira e mais rápida verificação.
@@ -105,7 +105,7 @@ async function checkPlaywrightBrowser() {
     const nodeExecutablePath = (process.platform === 'darwin' && app.isPackaged)
       ? path.join(process.resourcesPath, '..', 'Frameworks', 'Electron Framework.framework', 'Resources', 'node')
       : process.execPath;
-      
+
     const playwrightCliPath = path.resolve(app.getAppPath(), '..', 'app.asar.unpacked', 'node_modules', 'playwright', 'cli.js');
 
     if (fs.existsSync(nodeExecutablePath) && fs.existsSync(playwrightCliPath)) {
@@ -113,11 +113,11 @@ async function checkPlaywrightBrowser() {
       // 'print-driver-version' é um comando leve que falha se os navegadores não estiverem instalados.
       // É uma forma de "pingar" a instalação do Playwright.
       const { stdout } = await execPromise(command);
-      
+
       // Se o comando for bem-sucedido e retornar uma versão, está tudo OK.
       if (stdout && stdout.includes('chromium')) {
-         logToRenderer('SUCESSO', 'Verificação do CLI do Playwright confirmou que o navegador está instalado.');
-         return 'OK';
+        logToRenderer('SUCESSO', 'Verificação do CLI do Playwright confirmou que o navegador está instalado.');
+        return 'OK';
       }
     }
   } catch (error) {
@@ -135,7 +135,7 @@ function findExecutableInPath(command) {
     // 'which' (no macOS/Linux) e 'where' (no Windows) são comandos do sistema
     // para encontrar executáveis no PATH.
     const checkCommand = process.platform === 'win32' ? `where ${command}` : `which ${command}`;
-    
+
     exec(checkCommand, (error, stdout) => {
       if (!error && stdout) {
         // Pega a primeira linha da saída e remove espaços em branco.
@@ -179,7 +179,7 @@ ipcMain.on('reinstall-automation-browser', async () => {
     const nodeExecutablePath = (process.platform === 'darwin' && app.isPackaged)
       ? path.join(process.resourcesPath, '..', 'Frameworks', 'Electron Framework.framework', 'Resources', 'node')
       : process.execPath;
-      
+
     const playwrightCliPath = path.resolve(app.getAppPath(), '..', 'app.asar.unpacked', 'node_modules', 'playwright', 'cli.js');
 
     if (fs.existsSync(nodeExecutablePath) && fs.existsSync(playwrightCliPath)) {
@@ -206,7 +206,7 @@ ipcMain.on('reinstall-automation-browser', async () => {
       updateAutomationStatusInRenderer('Navegador de automação pronto.', null, false);
       return; // Sucesso, termina a função.
     }
-    
+
     // Se a Estratégia 2 também falhou.
     throw new Error("Falha em todas as estratégias de instalação. Não foi possível encontrar um método viável para instalar o Playwright (Node interno, CLI interno ou npx do sistema não encontrados/funcionaram).");
 
@@ -544,26 +544,33 @@ async function performPunch(page, punchDetails) {
 
   // 1. Clicar no botão para registrar o ponto
   await page.locator('#localizacao-incluir-ponto').click({ timeout: 15000 });
+  logToRenderer('DEBUG', 'Clique para registrar o ponto efetuado. Iniciando verificação...');
 
-  // 2. AGUARDAR a página reagir e processar o clique.
-  //    'networkidle' espera até que não haja mais tráfego de rede por 500ms.
-  //    Isso dá tempo para a lista de pontos ser atualizada via AJAX.
-  logToRenderer('DEBUG', 'Aguardando a página processar o clique...');
-  try {
-    await page.waitForLoadState('networkidle', { timeout: 10000 });
-  } catch (e) {
-    logToRenderer('AVISO', 'Timeout aguardando networkidle. A verificação continuará, mas pode ser instável.');
+  // 2. Lógica de verificação com retentativas (Polling)
+  const maxVerificationRetries = 5; // Tentar verificar 5 vezes
+  const verificationInterval = 5000; // Esperar 5 segundos entre cada tentativa
+  let punchVerified = false;
+
+  for (let i = 1; i <= maxVerificationRetries; i++) {
+    logToRenderer('DEBUG', `Tentativa de verificação ${i}/${maxVerificationRetries}...`);
+
+    // Sincroniza a lista de pontos da página.
+    const updatedPoints = await syncInitialPoints(page);
+
+    // Checa se a batida esperada está na lista atualizada.
+    if (updatedPoints.includes(punchDetails.time)) {
+      punchVerified = true;
+      break; // Sucesso! Sai do loop de verificação.
+    }
+
+    // Se não encontrou e não é a última tentativa, espera antes de tentar de novo.
+    if (i < maxVerificationRetries) {
+      await new Promise(resolve => setTimeout(resolve, verificationInterval));
+    }
   }
 
-  // 3. VERIFICAR o resultado: resincronize a lista de pontos da página.
-  logToRenderer('INFO', 'Verificando se o ponto foi registrado com sucesso...');
-  const updatedPoints = await syncInitialPoints(page); // Usa sua função já existente!
-
-  // 4. Checa se a batida que tentamos fazer agora existe na nova lista.
-  const punchWasSuccessful = updatedPoints.includes(punchDetails.time);
-
-  if (punchWasSuccessful) {
-    // SÓ AGORA podemos considerar um sucesso real.
+  // 3. Avaliar o resultado da verificação
+  if (punchVerified) {
     logToRenderer('SUCESSO', `Ponto ${punchDetails.type} (${punchDetails.time}) registrado e VERIFICADO com sucesso.`);
     try {
       await sendTelegramNotification(
@@ -574,18 +581,17 @@ async function performPunch(page, punchDetails) {
     } catch (err) {
       logToRenderer('AVISO', `Falha ao enviar notificação Telegram: ${err.message}`);
     }
-    return 'success'; // Retorna sucesso para a lógica de automação.
+    return 'success';
   } else {
-    // O clique aconteceu, mas o ponto não apareceu. ISTO é uma falha real.
-    logToRenderer('ERRO', `Falha ao registrar ponto ${punchDetails.type} (${punchDetails.time}). O clique ocorreu, mas a batida não apareceu na lista.`);
+    // Se após todas as tentativas o ponto não foi encontrado, aí sim é uma falha.
+    logToRenderer('ERRO', `Falha na verificação do ponto ${punchDetails.type} (${punchDetails.time}). O ponto não apareceu na lista após várias tentativas.`);
 
-    // Tira um screenshot para ajudar na depuração do que pode ter acontecido.
     try {
       const screenshotPath = `error_verification_failed_${Date.now()}.png`;
       await page.screenshot({ path: path.join(app.getPath('userData'), screenshotPath) });
       logToRenderer('DEBUG', `Screenshot da falha de verificação salvo em: ${screenshotPath}`);
     } catch (ssError) {
-      logToRenderer('ERRO', `Falha ao tirar screenshot da falha de verificação: ${ssError.message}`);
+      logToRenderer('ERRO', `Falha ao tirar screenshot: ${ssError.message}`);
     }
 
     try {
@@ -598,7 +604,7 @@ async function performPunch(page, punchDetails) {
       logToRenderer('AVISO', `Falha ao enviar notificação Telegram: ${err.message}`);
     }
 
-    // Lança um erro para que a lógica de retry em 'runAutomationStep' seja acionada.
+    // Lança um erro para que a lógica de retry de 'runAutomationStep' seja acionada.
     throw new Error(`Verificação pós-batida falhou para o horário ${punchDetails.time}.`);
   }
 }
