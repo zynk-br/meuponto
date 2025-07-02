@@ -8,6 +8,8 @@ const { expect } = require('playwright/test');
 const https = require('https');
 const { autoUpdater } = require('electron-updater');
 const { exec } = require('child_process');
+const util = require('util');
+const execPromise = util.promisify(exec);
 
 const store = new Store();
 const KEYTAR_SERVICE_NAME = 'MeuPontoAutomatizado';
@@ -81,15 +83,50 @@ ipcMain.on('delete-credential', async (event, account) => {
 
 // --- Automation Browser Management (Playwright) ---
 async function checkPlaywrightBrowser() {
+  logToRenderer('INFO', 'Iniciando verificação do navegador de automação (Playwright)...');
+  
   try {
     const playwright = require('playwright');
-    playwright.chromium.executablePath();
-    logToRenderer('INFO', 'Navegador Playwright Chromium encontrado.');
-    return 'OK';
-  } catch (err) {
-    logToRenderer('AVISO', 'O navegador Playwright Chromium não foi encontrado ou não está instalado corretamente.');
-    return 'FALTANDO';
+    // A função executablePath() é a primeira e mais rápida verificação.
+    // Ela verifica o cache padrão do Playwright.
+    const browserPath = playwright.chromium.executablePath();
+    if (browserPath) {
+      logToRenderer('SUCESSO', `Navegador Playwright encontrado no cache padrão: ${browserPath}`);
+      return 'OK';
+    }
+  } catch (e) {
+    // É esperado que caia aqui se não houver cache.
+    logToRenderer('AVISO', 'Cache padrão do Playwright não encontrado. Verificando alternativas...');
   }
+
+  // Se a verificação de cache falhou, vamos tentar uma abordagem mais profunda.
+  // Vamos usar o CLI do Playwright para verificar o status.
+  try {
+    const nodeExecutablePath = (process.platform === 'darwin' && app.isPackaged)
+      ? path.join(process.resourcesPath, '..', 'Frameworks', 'Electron Framework.framework', 'Resources', 'node')
+      : process.execPath;
+      
+    const playwrightCliPath = path.resolve(app.getAppPath(), '..', 'app.asar.unpacked', 'node_modules', 'playwright', 'cli.js');
+
+    if (fs.existsSync(nodeExecutablePath) && fs.existsSync(playwrightCliPath)) {
+      const command = `"${nodeExecutablePath}" "${playwrightCliPath}" print-driver-version`;
+      // 'print-driver-version' é um comando leve que falha se os navegadores não estiverem instalados.
+      // É uma forma de "pingar" a instalação do Playwright.
+      const { stdout } = await execPromise(command);
+      
+      // Se o comando for bem-sucedido e retornar uma versão, está tudo OK.
+      if (stdout && stdout.includes('chromium')) {
+         logToRenderer('SUCESSO', 'Verificação do CLI do Playwright confirmou que o navegador está instalado.');
+         return 'OK';
+      }
+    }
+  } catch (error) {
+    logToRenderer('AVISO', `A verificação do status do Playwright via CLI falhou. Detalhes: ${error.message}`);
+  }
+
+  // Se todas as verificações falharam, o navegador está ausente.
+  logToRenderer('ERRO', 'Nenhuma instalação funcional do navegador Playwright foi detectada.');
+  return 'MISSING';
 }
 
 // NOVA FUNÇÃO AUXILIAR
