@@ -87,8 +87,27 @@ async function checkPlaywrightBrowser() {
     return 'OK';
   } catch (err) {
     logToRenderer('AVISO', 'O navegador Playwright Chromium não foi encontrado ou não está instalado corretamente.');
-    return 'MISSING';
+    return 'FALTANDO';
   }
+}
+
+// NOVA FUNÇÃO AUXILIAR
+function findExecutableInPath(command) {
+  return new Promise((resolve) => {
+    // 'which' (no macOS/Linux) e 'where' (no Windows) são comandos do sistema
+    // para encontrar executáveis no PATH.
+    const checkCommand = process.platform === 'win32' ? `where ${command}` : `which ${command}`;
+    
+    exec(checkCommand, (error, stdout) => {
+      if (!error && stdout) {
+        // Pega a primeira linha da saída e remove espaços em branco.
+        const executablePath = stdout.trim().split('\n')[0];
+        resolve(executablePath);
+      } else {
+        resolve(null); // Não encontrado
+      }
+    });
+  });
 }
 
 ipcMain.handle('check-automation-browser', async () => {
@@ -96,58 +115,68 @@ ipcMain.handle('check-automation-browser', async () => {
 });
 
 ipcMain.on('reinstall-automation-browser', async () => {
-  logToRenderer('INFO', 'Tentando instalar/reinstalar o navegador Playwright Chromium...');
+  logToRenderer('INFO', 'Iniciando processo de instalação/verificação do navegador...');
   updateAutomationStatusInRenderer('Instalando navegador de automação...', null, false);
-  if (mainWindow) mainWindow.webContents.send('update-browser-status-from-main', 'LOADING');
+  if (mainWindow) mainWindow.webContents.send('update-browser-status-from-main', 'CARREGANDO');
 
-  try {
-    const { exec } = require('child_process');
-
-    // =======================================================
-    // CORREÇÃO CRÍTICA
-    // =======================================================
-    const playwrightCliPath = path.resolve(
-      app.getAppPath(),
-      '..',
-      'app.asar.unpacked', // A pasta onde o asarUnpack coloca os arquivos
-      'node_modules',
-      'playwright',
-      'cli.js'
-    );
-
-    // Verificar se o script realmente existe antes de tentar executá-lo.
-    if (!fs.existsSync(playwrightCliPath)) {
-      throw new Error(`CLI do Playwright não encontrado em ${playwrightCliPath}. Verifique a configuração 'asarUnpack' no package.json.`);
-    }
-
-    // Construir o comando usando o Node.js interno do Electron (process.execPath)
-    // Isso evita completamente a dependência do 'npx' ou de uma instalação global do Node.
-    const command = `"${process.execPath}" "${playwrightCliPath}" install chromium --with-deps`;
-    // =======================================================
-
-    logToRenderer('INFO', `Executando instalação: ${command}`);
-
-    await new Promise((resolve, reject) => {
-      exec(command, (error, stdout, stderr) => {
+  const runInstallCommand = (command) => {
+    return new Promise((resolve, reject) => {
+      logToRenderer('DEBUG', `Executando comando: ${command}`);
+      const env = { ...process.env, "PLAYWRIGHT_BROWSERS_PATH": "0" };
+      exec(command, { env }, (error, stdout, stderr) => {
         if (error) {
-          logToRenderer('ERRO', `Playwright install error: ${stderr || error.message}`);
+          logToRenderer('ERRO', `Falha na execução do comando. Stderr: ${stderr || 'N/A'}. Error: ${error.message}`);
           reject(new Error(stderr || error.message));
-          return;
+        } else {
+          logToRenderer('INFO', `Saída do comando: ${stdout}`);
+          resolve(stdout);
         }
-        logToRenderer('INFO', `Playwright install stdout: ${stdout}`);
-        resolve(stdout);
       });
     });
+  };
 
-    logToRenderer('SUCESSO', 'Navegador Playwright Chromium instalado/verificado com sucesso.');
-    if (mainWindow) mainWindow.webContents.send('update-browser-status-from-main', 'OK');
-    updateAutomationStatusInRenderer('Navegador de automação pronto.', null, false);
+  try {
+    // --- ESTRATÉGIA 1: Método mais robusto (padrão) ---
+    logToRenderer('INFO', 'Tentando Estratégia 1: Node interno + CLI interno...');
+    const nodeExecutablePath = (process.platform === 'darwin' && app.isPackaged)
+      ? path.join(process.resourcesPath, '..', 'Frameworks', 'Electron Framework.framework', 'Resources', 'node')
+      : process.execPath;
+      
+    const playwrightCliPath = path.resolve(app.getAppPath(), '..', 'app.asar.unpacked', 'node_modules', 'playwright', 'cli.js');
+
+    if (fs.existsSync(nodeExecutablePath) && fs.existsSync(playwrightCliPath)) {
+      const command = `"${nodeExecutablePath}" "${playwrightCliPath}" install chromium --with-deps`;
+      await runInstallCommand(command);
+      // Se chegou aqui, sucesso!
+      logToRenderer('SUCESSO', 'Navegador instalado com sucesso usando a estratégia padrão.');
+      if (mainWindow) mainWindow.webContents.send('update-browser-status-from-main', 'OK');
+      updateAutomationStatusInRenderer('Navegador de automação pronto.', null, false);
+      return; // Termina a função aqui.
+    }
+
+    // Se a Estratégia 1 falhou, tenta a próxima.
+    logToRenderer('AVISO', 'Estratégia 1 falhou (Node interno ou CLI não encontrados). Tentando Estratégia 2...');
+
+    // --- ESTRATÉGIA 2: Usar o 'npx' do sistema, se disponível ---
+    const npxPath = await findExecutableInPath('npx');
+    if (npxPath) {
+      logToRenderer('INFO', `Encontrado 'npx' do sistema em: ${npxPath}.`);
+      const command = `"${npxPath}" playwright install chromium --with-deps`;
+      await runInstallCommand(command);
+      logToRenderer('SUCESSO', 'Navegador instalado com sucesso usando `npx` do sistema.');
+      if (mainWindow) mainWindow.webContents.send('update-browser-status-from-main', 'OK');
+      updateAutomationStatusInRenderer('Navegador de automação pronto.', null, false);
+      return; // Sucesso, termina a função.
+    }
+    
+    // Se a Estratégia 2 também falhou.
+    throw new Error("Falha em todas as estratégias de instalação. Não foi possível encontrar um método viável para instalar o Playwright (Node interno, CLI interno ou npx do sistema não encontrados/funcionaram).");
 
   } catch (error) {
-    logToRenderer('ERRO', `Falha ao instalar o navegador Playwright: ${error.message}`);
-    if (mainWindow) mainWindow.webContents.send('update-browser-status-from-main', 'MISSING');
-    updateAutomationStatusInRenderer('Falha ao instalar navegador de automação.', null, false);
-    dialog.showErrorBox("Erro de Instalação", `Falha ao instalar o navegador Playwright: ${error.message}. Verifique sua conexão com a internet e tente novamente. Logs podem conter mais detalhes.`);
+    logToRenderer('ERRO', `Falha crítica no processo de instalação do navegador: ${error.message}`);
+    if (mainWindow) mainWindow.webContents.send('update-browser-status-from-main', 'FALTANDO');
+    updateAutomationStatusInRenderer('Falha ao instalar navegador.', null, false);
+    dialog.showErrorBox("Erro de Instalação", `Não foi possível instalar o navegador Playwright: ${error.message}.`);
   }
 });
 
@@ -717,7 +746,7 @@ function createWindow() {
     frame: true,
     webPreferences: {
       preload: process.env.ELECTRON_PRELOAD_URL || path.join(__dirname, 'preload.js'),
-      nodeIntegration: true,
+      nodeIntegration: false,
       contextIsolation: true,
       spellcheck: false,
     }
