@@ -102,9 +102,7 @@ async function checkPlaywrightBrowser() {
   // Se a verificação de cache falhou, vamos tentar uma abordagem mais profunda.
   // Vamos usar o CLI do Playwright para verificar o status.
   try {
-    const nodeExecutablePath = (process.platform === 'darwin' && app.isPackaged)
-      ? path.join(process.resourcesPath, '..', 'Frameworks', 'Electron Framework.framework', 'Resources', 'node')
-      : process.execPath;
+    const nodeExecutablePath = process.execPath;
 
     const playwrightCliPath = path.resolve(app.getAppPath(), '..', 'app.asar.unpacked', 'node_modules', 'playwright', 'cli.js');
 
@@ -176,9 +174,7 @@ ipcMain.on('reinstall-automation-browser', async () => {
   try {
     // --- ESTRATÉGIA 1: Método mais robusto (padrão) ---
     logToRenderer('INFO', 'Tentando Estratégia 1: Node interno + CLI interno...');
-    const nodeExecutablePath = (process.platform === 'darwin' && app.isPackaged)
-      ? path.join(process.resourcesPath, '..', 'Frameworks', 'Electron Framework.framework', 'Resources', 'node')
-      : process.execPath;
+    const nodeExecutablePath = process.execPath;
 
     const playwrightCliPath = path.resolve(app.getAppPath(), '..', 'app.asar.unpacked', 'node_modules', 'playwright', 'cli.js');
 
