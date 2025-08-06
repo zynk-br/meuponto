@@ -14,6 +14,9 @@ const store = new Store();
 const KEYTAR_SERVICE_NAME = 'MeuPontoAutomatizado';
 const TELEGRAM_BOT_TOKEN = '7391147858:AAFt8DP14NgxZin3Bgr9i5q2FZO1-i7gcAk';
 
+const LOCAL_BROWSERS_PATH = path.join(app.getPath('userData'), 'playwright-browsers');
+let activeBrowserExecutablePath = null; // Caminho para o executável que será usado
+
 let mainWindow;
 let playwrightBrowser;
 let automationTimers = [];
@@ -82,55 +85,37 @@ ipcMain.on('delete-credential', async (event, account) => {
 
 // --- Automation Browser Management (Playwright) ---
 async function checkPlaywrightBrowser() {
-  logToRenderer('INFO', 'Iniciando verificação do navegador de automação (Playwright)...');
+    logToRenderer('INFO', 'Iniciando verificação inteligente do navegador de automação...');
+    activeBrowserExecutablePath = null; // Reseta o caminho ativo
 
-  try {
-    const playwright = require('playwright');
-    const browserPath = playwright.chromium.executablePath();
-    if (fs.existsSync(browserPath)) {
-      logToRenderer('SUCESSO', `Navegador Playwright encontrado no cache padrão: ${browserPath}`);
-      return 'OK';
+    // 1. Tenta encontrar a instalação padrão/global
+    try {
+        const playwright = require('playwright');
+        const globalPath = playwright.chromium.executablePath();
+        if (fs.existsSync(globalPath)) {
+            logToRenderer('SUCESSO', `Navegador Playwright encontrado na instalação padrão do sistema: ${globalPath}`);
+            activeBrowserExecutablePath = globalPath;
+            return 'OK';
+        }
+    } catch (e) {
+        logToRenderer('AVISO', 'Nenhuma instalação padrão/global do Playwright encontrada.');
     }
-  } catch (e) {
-    logToRenderer('AVISO', 'Cache padrão do Playwright não encontrado. Verificando via CLI...');
-  }
 
-  try {
-    const playwrightCliPath = path.resolve(app.getAppPath(), '..', 'app.asar.unpacked', 'node_modules', 'playwright', 'cli.js');
-
-    if (fs.existsSync(playwrightCliPath)) {
-      const stdout = await new Promise((resolve, reject) => {
-        const child = fork(
-          playwrightCliPath,
-          ['print-driver-version'],
-          { silent: true } // silent: true redireciona stdio para o processo pai.
-        );
-
-        let output = '';
-        child.stdout.on('data', (data) => output += data.toString());
-        child.stderr.on('data', (data) => output += data.toString());
-
-        child.on('close', (code) => {
-          if (code === 0) {
-            resolve(output);
-          } else {
-            reject(new Error(`Processo CLI do Playwright finalizou com código ${code}. Saída: ${output}`));
-          }
-        });
-        child.on('error', reject);
-      });
-      
-      if (stdout && stdout.includes('chromium')) {
-        logToRenderer('SUCESSO', 'Verificação do CLI do Playwright confirmou que o navegador está instalado.');
-        return 'OK';
-      }
+    // 2. Se falhar, tenta encontrar a instalação local/autocontida
+    try {
+        const playwright = require('playwright');
+        const localPath = playwright.chromium.executablePath(LOCAL_BROWSERS_PATH);
+        if (fs.existsSync(localPath)) {
+            logToRenderer('SUCESSO', `Navegador Playwright encontrado na instalação autocontida do app: ${localPath}`);
+            activeBrowserExecutablePath = localPath;
+            return 'OK';
+        }
+    } catch (e) {
+        logToRenderer('AVISO', 'Nenhuma instalação autocontida do Playwright encontrada.');
     }
-  } catch (error) {
-    logToRenderer('AVISO', `A verificação do status do Playwright via CLI falhou. Detalhes: ${error.message}`);
-  }
 
-  logToRenderer('ERRO', 'Nenhuma instalação funcional do navegador Playwright foi detectada.');
-  return 'MISSING';
+    logToRenderer('ERRO', 'Nenhuma instalação funcional do Playwright foi detectada.');
+    return 'MISSING';
 }
 
 // NOVA FUNÇÃO AUXILIAR
@@ -157,73 +142,38 @@ ipcMain.handle('check-automation-browser', async () => {
 });
 
 ipcMain.on('reinstall-automation-browser', async () => {
-  logToRenderer('INFO', 'Iniciando processo de instalação do navegador...');
-  updateAutomationStatusInRenderer('Instalando navegador de automação...', null, false);
-  if (mainWindow) mainWindow.webContents.send('update-browser-status-from-main', 'CARREGANDO');
+    logToRenderer('INFO', 'Iniciando processo de instalação autocontida do navegador...');
+    updateAutomationStatusInRenderer('Instalando navegador de automação...', null, false);
+    if (mainWindow) mainWindow.webContents.send('update-browser-status-from-main', 'CARREGANDO');
 
-  try {
-    const playwrightCliPath = path.resolve(app.getAppPath(), '..', 'app.asar.unpacked', 'node_modules', 'playwright', 'cli.js');
+    try {
+        const playwrightCliPath = path.resolve(app.getAppPath(), '..', 'app.asar.unpacked', 'node_modules', 'playwright', 'cli.js');
+        if (!fs.existsSync(playwrightCliPath)) throw new Error(`CLI do Playwright não encontrado.`);
+        
+        fs.mkdirSync(LOCAL_BROWSERS_PATH, { recursive: true });
 
-    if (!fs.existsSync(playwrightCliPath)) {
-      throw new Error(`CLI do Playwright não encontrado em: ${playwrightCliPath}`);
+        await new Promise((resolve, reject) => {
+            const child = fork(
+                playwrightCliPath,
+                ['install', 'chromium', '--with-deps'],
+                { stdio: 'pipe', env: { ...process.env, "PLAYWRIGHT_BROWSERS_PATH": LOCAL_BROWSERS_PATH } }
+            );
+            child.stdout.on('data', (data) => logToRenderer('DEBUG', `[Install]: ${data.toString().trim()}`));
+            child.stderr.on('data', (data) => logToRenderer('ERRO', `[Install]: ${data.toString().trim()}`));
+            child.on('close', (code) => code === 0 ? resolve() : reject(new Error(`Processo de instalação falhou com código ${code}.`)));
+            child.on('error', reject);
+        });
+
+        await checkPlaywrightBrowser(); // Re-verifica para atualizar a variável activeBrowserExecutablePath
+        if (mainWindow) mainWindow.webContents.send('update-browser-status-from-main', 'OK');
+        updateAutomationStatusInRenderer('Navegador de automação pronto.', null, false);
+
+    } catch (error) {
+        logToRenderer('ERRO', `Falha crítica na instalação do navegador: ${error.message}`);
+        if (mainWindow) mainWindow.webContents.send('update-browser-status-from-main', 'FALTANDO');
+        updateAutomationStatusInRenderer('Falha ao instalar navegador.', null, false);
+        dialog.showErrorBox("Erro de Instalação", `Não foi possível instalar o navegador Playwright: ${error.message}.`);
     }
-
-    logToRenderer('DEBUG', `CLI do Playwright encontrado em: ${playwrightCliPath}. Iniciando processo fork...`);
-
-    // Usar child_process.fork para uma execução mais robusta
-    await new Promise((resolve, reject) => {
-      const child = fork(
-        playwrightCliPath,
-        ['install', 'chromium', '--with-deps'],
-        {
-          stdio: 'pipe', // Captura stdout e stderr
-          env: { ...process.env, "PLAYWRIGHT_BROWSERS_PATH": "0" }
-        }
-      );
-
-      let stdout = '';
-      let stderr = '';
-
-      child.stdout.on('data', (data) => {
-        const message = data.toString();
-        stdout += message;
-        logToRenderer('DEBUG', `[Playwright Install]: ${message.trim()}`);
-      });
-
-      child.stderr.on('data', (data) => {
-        const message = data.toString();
-        stderr += message;
-        logToRenderer('ERRO', `[Playwright Install]: ${message.trim()}`);
-      });
-
-      child.on('close', (code) => {
-        if (code === 0) {
-          logToRenderer('SUCESSO', 'Navegador instalado com sucesso via fork.');
-          logToRenderer('INFO', `Saída completa do fork: ${stdout}`);
-          resolve();
-        } else {
-          const errorMessage = `O processo de instalação do Playwright falhou com o código ${code}. Stderr: ${stderr || 'N/A'}. Stdout: ${stdout || 'N/A'}`;
-          logToRenderer('ERRO', errorMessage);
-          reject(new Error(errorMessage));
-        }
-      });
-
-      child.on('error', (err) => {
-        logToRenderer('ERRO', `Falha ao iniciar o processo fork para a instalação do Playwright: ${err.message}`);
-        reject(err);
-      });
-    });
-
-    // Se a promise resolver, significa sucesso.
-    if (mainWindow) mainWindow.webContents.send('update-browser-status-from-main', 'OK');
-    updateAutomationStatusInRenderer('Navegador de automação pronto.', null, false);
-
-  } catch (error) {
-    logToRenderer('ERRO', `Falha crítica no processo de instalação do navegador: ${error.message}`);
-    if (mainWindow) mainWindow.webContents.send('update-browser-status-from-main', 'FALTANDO');
-    updateAutomationStatusInRenderer('Falha ao instalar navegador.', null, false);
-    dialog.showErrorBox("Erro de Instalação", `Não foi possível instalar o navegador Playwright: ${error.message}.`);
-  }
 });
 
 
@@ -302,23 +252,32 @@ async function runAutomationStep(stepFunction, ...args) {
 
 
 async function launchPlaywright() {
-  if (playwrightBrowser) return playwrightBrowser;
-  logToRenderer('INFO', 'Iniciando navegador de automação...');
-  updateAutomationStatusInRenderer('Iniciando navegador de automação...');
-  try {
-    const playwright = require('playwright');
-    playwrightBrowser = await playwright.chromium.launch({ headless: true }); // Alterado para true por padrão para produção
-    logToRenderer('SUCESSO', 'Playwright browser iniciado.');
-    return playwrightBrowser;
-  } catch (launchError) {
-    logToRenderer('ERRO', `Falha ao iniciar Playwright browser: ${launchError.message}`);
-    // Se o erro específico de executável ausente ocorrer, atualize o status do navegador para o renderer.
-    if (launchError.message.includes("Executável não existe")) {
-      logToRenderer('ERRO', "O executável do Playwright browser não foi encontrado. Forçando estatus de atualização para FALTANDO.");
-      if (mainWindow) mainWindow.webContents.send('update-browser-status-from-main', 'FALTANDO');
+    if (playwrightBrowser) return playwrightBrowser;
+    logToRenderer('INFO', 'Iniciando navegador de automação...');
+    updateAutomationStatusInRenderer('Iniciando navegador de automação...');
+    
+    // Re-verifica o caminho caso tenha sido instalado após o início do app
+    await checkPlaywrightBrowser(); 
+
+    if (!activeBrowserExecutablePath) {
+        throw new Error("Nenhum executável do navegador Playwright foi encontrado.");
     }
-    throw launchError; // Re-throw para ser pego pelo startAutomation
-  }
+    
+    try {
+        const playwright = require('playwright');
+        logToRenderer('DEBUG', `Tentando iniciar o navegador em: ${activeBrowserExecutablePath}`);
+
+        playwrightBrowser = await playwright.chromium.launch({
+            headless: true,
+            executablePath: activeBrowserExecutablePath
+        });
+        logToRenderer('SUCESSO', 'Playwright browser iniciado com sucesso.');
+        return playwrightBrowser;
+    } catch (launchError) {
+        logToRenderer('ERRO', `Falha ao iniciar Playwright browser: ${launchError.message}`);
+        if (mainWindow) mainWindow.webContents.send('update-browser-status-from-main', 'FALTANDO');
+        throw launchError;
+    }
 }
 
 async function closePlaywright() {

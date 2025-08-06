@@ -1,6 +1,6 @@
 {
   "name": "meu-ponto",
-  "version": "2.0.10",
+  "version": "2.0.11",
   "description": "Automatizador de ponto",
   "main": "./out/electron/main.js",
   "author": {
