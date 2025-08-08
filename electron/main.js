@@ -180,7 +180,7 @@ ipcMain.on('reinstall-automation-browser', async () => {
         process.env.PLAYWRIGHT_BROWSERS_PATH = LOCAL_BROWSERS_PATH;
         
         // Busca o CLI do Playwright
-        const playwrightCliPath = require.resolve('playwright/lib/cli/cli.js');
+        const playwrightCliPath = require.resolve('playwright/cli.js');
         if (!fs.existsSync(playwrightCliPath)) {
             throw new Error(`CLI do Playwright não encontrado em: ${playwrightCliPath}`);
         }
