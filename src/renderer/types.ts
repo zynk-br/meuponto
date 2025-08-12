@@ -83,6 +83,7 @@ export interface ElectronAPI {
   deleteCredential: (account: string) => void;
 
   checkAutomationBrowser: () => Promise<BrowserStatus>;
+  getBrowserPath: () => Promise<string>;
   reinstallAutomationBrowser: () => void;
   onBrowserStatusUpdate: (callback: (status: BrowserStatus) => void) => () => void;
 

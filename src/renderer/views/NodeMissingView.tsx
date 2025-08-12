@@ -2,7 +2,7 @@
 import React from 'react';
 import { useAppContext } from '../hooks/useAppContext'; // Ajustado
 import { LogLevel } from '../types'; // Ajustado
-import { NODE_DOWNLOAD_URL, HOMEBREW_INSTALL_COMMAND, HOMEBREW_NODE_INSTALL_COMMAND } from '../constants'; // Ajustado
+// import { NODE_DOWNLOAD_URL, HOMEBREW_INSTALL_COMMAND, HOMEBREW_NODE_INSTALL_COMMAND } from '../constants'; // Ajustado - Unused imports removed
 
 // Esta View é largamente obsoleta no contexto de um app Electron empacotado,
 // pois o Node.js é parte do runtime do Electron.

@@ -14,8 +14,8 @@ dist-ssr
 out
 release
 certificate.p12
-build.sh
-
+build-mac.sh
+build-win.sh
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -1,8 +1,7 @@
-// Arquivo agora em: src/renderer/components/SettingsModal.tsx
 import React, { useState, useEffect } from 'react';
-import Modal from './Modal'; // Ajustado
-import { useAppContext } from '../hooks/useAppContext'; // Ajustado
-import { BrowserStatus, LogLevel } from '../types'; // Ajustado
+import Modal from './Modal';
+import { useAppContext } from '../hooks/useAppContext';
+import { BrowserStatus, LogLevel } from '../types';
 
 const SettingsModal: React.FC = () => {
   const {
@@ -15,20 +14,27 @@ const SettingsModal: React.FC = () => {
   } = useAppContext();
 
   const [localSettings, setLocalSettings] = useState(settings);
+  const [, setBrowserPath] = useState<string>('Verificando...');
 
   useEffect(() => {
     if (isSettingsModalOpen) {
       setLocalSettings(settings);
+      // Busca o caminho do navegador quando o modal abre
+      if (window.electronAPI && window.electronAPI.getBrowserPath) {
+        window.electronAPI.getBrowserPath().then((path: string) => {
+          setBrowserPath(path || 'Não encontrado');
+        });
+      }
     }
   }, [isSettingsModalOpen, settings]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
     if (type === 'checkbox') {
-        const { checked } = e.target as HTMLInputElement;
-        setLocalSettings(prev => ({ ...prev, [name]: checked }));
+      const { checked } = e.target as HTMLInputElement;
+      setLocalSettings(prev => ({ ...prev, [name]: checked }));
     } else {
-        setLocalSettings(prev => ({ ...prev, [name]: value }));
+      setLocalSettings(prev => ({ ...prev, [name]: value }));
     }
   };
 
@@ -47,14 +53,42 @@ const SettingsModal: React.FC = () => {
   const handleReinstallBrowser = () => {
     addLog(LogLevel.INFO, "Solicitando reinstalação do navegador de automação (Playwright)...");
     if (window.electronAPI) {
-        updateSettings({ automationBrowserStatus: BrowserStatus.LOADING }, true);
-        window.electronAPI.reinstallAutomationBrowser();
+      updateSettings({ automationBrowserStatus: BrowserStatus.LOADING }, true);
+      window.electronAPI.reinstallAutomationBrowser();
+      // Atualiza o caminho após 3 segundos
+      setTimeout(async () => {
+        if (window.electronAPI.getBrowserPath) {
+          const newPath = await window.electronAPI.getBrowserPath();
+          setBrowserPath(newPath || 'Não encontrado');
+        }
+      }, 3000);
     } else {
-        addLog(LogLevel.ERROR, "Electron API não disponível para reinstalar o navegador.");
-         updateSettings({ automationBrowserStatus: BrowserStatus.MISSING }, true);
+      addLog(LogLevel.ERROR, "Electron API não disponível para reinstalar o navegador.");
+      updateSettings({ automationBrowserStatus: BrowserStatus.MISSING }, true);
     }
   };
-  
+
+  // Função removida pois não estava sendo usada
+  // const _handleCheckBrowser = async () => {
+  //   addLog(LogLevel.INFO, "Verificando navegador instalado...");
+  //   if (window.electronAPI) {
+  //     const status = await window.electronAPI.checkAutomationBrowser();
+  //     updateSettings({ automationBrowserStatus: status }, true);
+
+  //     // Atualiza o caminho também
+  //     if (window.electronAPI.getBrowserPath) {
+  //       const path = await window.electronAPI.getBrowserPath();
+  //       setBrowserPath(path || 'Não encontrado');
+  //     }
+
+  //     if (status === BrowserStatus.OK) {
+  //       addLog(LogLevel.SUCCESS, "Navegador encontrado e funcionando!");
+  //     } else {
+  //       addLog(LogLevel.WARNING, "Navegador não encontrado. Clique em 'Instalar' para configurar.");
+  //     }
+  //   }
+  // };
+
   const getBrowserStatusIcon = () => {
     switch (settings.automationBrowserStatus) {
       case BrowserStatus.LOADING:
@@ -151,18 +185,18 @@ const SettingsModal: React.FC = () => {
               </div>
             </div>
             {settings.automationBrowserStatus === BrowserStatus.MISSING && (
-               <p className="text-xs text-red-600 dark:text-red-400">O navegador de automação parece estar ausente ou corrompido. Tente reinstalá-lo.</p>
+              <p className="text-xs text-red-600 dark:text-red-400">O navegador de automação parece estar ausente ou corrompido. Tente reinstalá-lo.</p>
             )}
-             {settings.automationBrowserStatus === BrowserStatus.LOADING && (
-               <p className="text-xs text-yellow-600 dark:text-yellow-400">O navegador de automação está sendo verificado/instalado...</p>
+            {settings.automationBrowserStatus === BrowserStatus.LOADING && (
+              <p className="text-xs text-yellow-600 dark:text-yellow-400">O navegador de automação está sendo verificado/instalado...</p>
             )}
             <button
               onClick={handleReinstallBrowser}
               disabled={settings.automationBrowserStatus === BrowserStatus.LOADING}
               className="w-full px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 dark:bg-primary-500 dark:hover:bg-primary-600 disabled:opacity-50"
             >
-             <i className="fas fa-sync-alt mr-2"></i> 
-             {settings.automationBrowserStatus === BrowserStatus.MISSING ? "Instalar Navegador" : "Reinstalar/Verificar Navegador"}
+              <i className="fas fa-sync-alt mr-2"></i>
+              {settings.automationBrowserStatus === BrowserStatus.MISSING ? "Instalar Navegador" : "Reinstalar/Verificar Navegador"}
             </button>
           </div>
         </div>

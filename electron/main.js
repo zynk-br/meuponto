@@ -7,18 +7,21 @@ const keytar = require('keytar');
 const { expect } = require('playwright/test');
 const https = require('https');
 const { autoUpdater } = require('electron-updater');
-const { exec, fork } = require('child_process');
+const { exec, fork, execSync } = require('child_process');
 const util = require('util');
+
+const execPromise = util.promisify(exec);
+const LOCAL_BROWSERS_PATH = path.join(app.getPath('userData'), 'playwright-browsers');
 
 const store = new Store();
 const KEYTAR_SERVICE_NAME = 'MeuPontoAutomatizado';
 const TELEGRAM_BOT_TOKEN = '7391147858:AAFt8DP14NgxZin3Bgr9i5q2FZO1-i7gcAk';
 
-const LOCAL_BROWSERS_PATH = path.join(app.getPath('userData'), 'playwright-browsers');
-let activeBrowserExecutablePath = null; // Caminho para o executável que será usado
+const POSSIBLE_BROWSER_PATHS = [];
+let activeBrowserExecutablePath = null;
+let playwrightBrowser = null;
 
 let mainWindow;
-let playwrightBrowser;
 let automationTimers = [];
 let automationIsRunning = false;
 let automationCurrentRetries = 0;
@@ -98,49 +101,158 @@ function findChromiumDir() {
     return null;
 }
 
-async function checkPlaywrightBrowser() {
-    logToRenderer('INFO', 'Iniciando verificação inteligente do navegador de automação...');
-    activeBrowserExecutablePath = null;
-
+// Função para encontrar todos os possíveis caminhos do Playwright/Chromium
+function findAllPossibleBrowserPaths() {
+    const paths = [];
+    const platform = process.platform;
+    
+    // 1. Pasta local da aplicação (prioridade máxima)
+    const localPath = path.join(app.getPath('userData'), 'playwright-browsers');
+    paths.push(localPath);
+    
+    // 2. Pasta de cache padrão do Playwright (varia por OS)
+    if (platform === 'win32') {
+        // Windows: %USERPROFILE%\AppData\Local\ms-playwright
+        const windowsPath = path.join(process.env.USERPROFILE || '', 'AppData', 'Local', 'ms-playwright');
+        if (windowsPath) paths.push(windowsPath);
+    } else if (platform === 'darwin') {
+        // macOS: ~/Library/Caches/ms-playwright
+        const macPath = path.join(process.env.HOME || '', 'Library', 'Caches', 'ms-playwright');
+        if (macPath) paths.push(macPath);
+    } else {
+        // Linux: ~/.cache/ms-playwright
+        const linuxPath = path.join(process.env.HOME || '', '.cache', 'ms-playwright');
+        if (linuxPath) paths.push(linuxPath);
+    }
+    
+    // 3. Variável de ambiente personalizada PLAYWRIGHT_BROWSERS_PATH
+    if (process.env.PLAYWRIGHT_BROWSERS_PATH) {
+        paths.push(process.env.PLAYWRIGHT_BROWSERS_PATH);
+    }
+    
+    // 4. Instalação global do npm (se existir)
     try {
-        const playwright = require('playwright');
+        const npmRoot = execSync('npm root -g', { encoding: 'utf8' }).trim();
+        const globalPlaywrightPath = path.join(npmRoot, 'playwright-chromium', '.local-browsers');
+        paths.push(globalPlaywrightPath);
+    } catch (e) {
+        // npm não está disponível ou falhou
+    }
+    
+    // 5. Dentro do próprio app (se bundled)
+    if (app.isPackaged) {
+        const appPath = path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'playwright', '.local-browsers');
+        paths.push(appPath);
+    }
+    
+    return [...new Set(paths)]; // Remove duplicatas
+}
+
+// Função para encontrar o executável do Chromium em um diretório
+function findChromiumExecutable(browserPath) {
+    if (!fs.existsSync(browserPath)) return null;
+    
+    const platform = process.platform;
+    const possibleExecutables = [];
+    
+    // Procura por diferentes versões do Chromium
+    try {
+        const dirs = fs.readdirSync(browserPath);
+        const chromiumDirs = dirs.filter(dir => dir.startsWith('chromium-'));
         
-        // 1. Verifica instalação local primeiro
-        const chromiumDir = findChromiumDir();
-        if (chromiumDir) {
-            logToRenderer('DEBUG', `Diretório Chromium encontrado: ${chromiumDir}`);
+        for (const chromiumDir of chromiumDirs) {
+            const fullPath = path.join(browserPath, chromiumDir);
             
-            let execPath;
-            if (process.platform === 'win32') {
-                execPath = path.join(chromiumDir, 'chrome-win', 'chrome.exe');
-            } else if (process.platform === 'darwin') {
-                execPath = path.join(chromiumDir, 'chrome-mac', 'Chromium.app', 'Contents', 'MacOS', 'Chromium');
+            if (platform === 'win32') {
+                possibleExecutables.push(
+                    path.join(fullPath, 'chrome-win', 'chrome.exe'),
+                    path.join(fullPath, 'chrome-win64', 'chrome.exe'),
+                    path.join(fullPath, 'chrome.exe')
+                );
+            } else if (platform === 'darwin') {
+                possibleExecutables.push(
+                    path.join(fullPath, 'chrome-mac', 'Chromium.app', 'Contents', 'MacOS', 'Chromium'),
+                    path.join(fullPath, 'chrome-mac-arm64', 'Chromium.app', 'Contents', 'MacOS', 'Chromium'),
+                    path.join(fullPath, 'Chromium.app', 'Contents', 'MacOS', 'Chromium')
+                );
             } else {
-                execPath = path.join(chromiumDir, 'chrome-linux', 'chrome');
-            }
-            
-            if (fs.existsSync(execPath)) {
-                logToRenderer('SUCESSO', `Navegador encontrado localmente: ${execPath}`);
-                activeBrowserExecutablePath = execPath;
-                process.env.PLAYWRIGHT_BROWSERS_PATH = LOCAL_BROWSERS_PATH;
-                return 'OK';
+                possibleExecutables.push(
+                    path.join(fullPath, 'chrome-linux', 'chrome'),
+                    path.join(fullPath, 'chrome'),
+                    path.join(fullPath, 'chromium')
+                );
             }
         }
+    } catch (e) {
+        logToRenderer('DEBUG', `Erro ao listar diretório ${browserPath}: ${e.message}`);
+    }
+    
+    // Retorna o primeiro executável válido encontrado
+    for (const exec of possibleExecutables) {
+        if (fs.existsSync(exec)) {
+            try {
+                fs.accessSync(exec, fs.constants.X_OK); // Verifica se é executável
+                return exec;
+            } catch (e) {
+                // Arquivo existe mas não é executável, continua procurando
+            }
+        }
+    }
+    
+    return null;
+}
+
+// Função principal de verificação do navegador
+async function checkPlaywrightBrowser() {
+    logToRenderer('INFO', 'Iniciando busca inteligente pelo navegador Chromium...');
+    activeBrowserExecutablePath = null;
+    
+    const searchPaths = findAllPossibleBrowserPaths();
+    logToRenderer('DEBUG', `Buscando em ${searchPaths.length} locais possíveis...`);
+    
+    // Busca em todos os caminhos possíveis
+    for (const searchPath of searchPaths) {
+        logToRenderer('DEBUG', `Verificando: ${searchPath}`);
         
-        // 2. Verifica instalação global
-        delete process.env.PLAYWRIGHT_BROWSERS_PATH;
-        const globalPath = playwright.chromium.executablePath();
-        if (fs.existsSync(globalPath)) {
-            logToRenderer('SUCESSO', `Navegador encontrado globalmente: ${globalPath}`);
-            activeBrowserExecutablePath = globalPath;
+        const executable = findChromiumExecutable(searchPath);
+        if (executable) {
+            logToRenderer('SUCESSO', `Chromium encontrado: ${executable}`);
+            activeBrowserExecutablePath = executable;
+            
+            // Salva o caminho encontrado para uso futuro
+            store.set('lastKnownBrowserPath', executable);
+            
+            // Define a variável de ambiente para o Playwright usar este caminho
+            process.env.PLAYWRIGHT_BROWSERS_PATH = path.dirname(path.dirname(executable));
+            
             return 'OK';
         }
-        
-    } catch (e) {
-        logToRenderer('ERRO', `Erro na verificação: ${e.message}`);
     }
-
-    logToRenderer('ERRO', 'Nenhuma instalação do Playwright detectada.');
+    
+    // Verifica se há um caminho salvo anteriormente
+    const lastKnown = store.get('lastKnownBrowserPath');
+    if (lastKnown && fs.existsSync(lastKnown)) {
+        logToRenderer('INFO', `Usando navegador previamente conhecido: ${lastKnown}`);
+        activeBrowserExecutablePath = lastKnown;
+        return 'OK';
+    }
+    
+    // Última tentativa: usar o Playwright para descobrir o caminho
+    try {
+        const playwright = require('playwright');
+        const browserPath = playwright.chromium.executablePath();
+        
+        if (browserPath && fs.existsSync(browserPath)) {
+            logToRenderer('SUCESSO', `Playwright reportou navegador em: ${browserPath}`);
+            activeBrowserExecutablePath = browserPath;
+            store.set('lastKnownBrowserPath', browserPath);
+            return 'OK';
+        }
+    } catch (e) {
+        logToRenderer('DEBUG', `Playwright não pôde fornecer caminho: ${e.message}`);
+    }
+    
+    logToRenderer('AVISO', 'Nenhuma instalação do Chromium foi encontrada');
     return 'MISSING';
 }
 
@@ -167,10 +279,18 @@ ipcMain.handle('check-automation-browser', async () => {
   return await checkPlaywrightBrowser();
 });
 
+// Handler para obter o caminho atual do navegador
+ipcMain.handle('get-browser-path', () => {
+    return activeBrowserExecutablePath || 'Não encontrado';
+});
+
 ipcMain.on('reinstall-automation-browser', async () => {
     logToRenderer('INFO', 'Iniciando processo de instalação autocontida do navegador...');
     updateAutomationStatusInRenderer('Instalando navegador de automação...', null, false);
     if (mainWindow) mainWindow.webContents.send('update-browser-status-from-main', 'CARREGANDO');
+
+    // Define o caminho local para instalação
+    const LOCAL_BROWSERS_PATH = path.join(app.getPath('userData'), 'playwright-browsers');
 
     try {
         // Cria o diretório se não existir
@@ -178,6 +298,8 @@ ipcMain.on('reinstall-automation-browser', async () => {
         
         // Define a variável de ambiente ANTES da instalação
         process.env.PLAYWRIGHT_BROWSERS_PATH = LOCAL_BROWSERS_PATH;
+
+        logToRenderer('INFO', `Instalando Chromium em: ${LOCAL_BROWSERS_PATH}`);
         
         // Busca o CLI do Playwright
         const playwrightCliPath = require.resolve('playwright/cli.js');
@@ -185,65 +307,148 @@ ipcMain.on('reinstall-automation-browser', async () => {
             throw new Error(`CLI do Playwright não encontrado em: ${playwrightCliPath}`);
         }
         
-        logToRenderer('DEBUG', `Instalando em: ${LOCAL_BROWSERS_PATH}`);
-        logToRenderer('DEBUG', `Usando CLI: ${playwrightCliPath}`);
+        // Método 1: Tentar usar npx (mais universal)
+        try {
+            logToRenderer('INFO', 'Tentando instalação via npx...');
+            
+            const command = process.platform === 'win32'
+                ? `set PLAYWRIGHT_BROWSERS_PATH=${LOCAL_BROWSERS_PATH} && npx playwright install chromium`
+                : `PLAYWRIGHT_BROWSERS_PATH=${LOCAL_BROWSERS_PATH} npx playwright install chromium`;
+            
+            const { stdout, stderr } = await execPromise(command, {
+                env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: LOCAL_BROWSERS_PATH }
+            });
+            
+            if (stdout) logToRenderer('DEBUG', `npx output: ${stdout}`);
+            if (stderr && !stderr.includes('warning')) logToRenderer('DEBUG', `npx stderr: ${stderr}`);
+            
+            logToRenderer('SUCESSO', 'Instalação via npx concluída');
+            
+        } catch (npxError) {
+            logToRenderer('AVISO', `NPX falhou: ${npxError.message}, tentando método alternativo...`);
+            
+            // Método 2: Usar o CLI do Playwright diretamente
+            const cliPath = findPlaywrightCLI();
+            
+            if (cliPath) {
+                await new Promise((resolve, reject) => {
+                    const child = fork(cliPath, ['install', 'chromium'], {
+                        env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: LOCAL_BROWSERS_PATH },
+                        silent: false
+                    });
+                    
+                    child.on('close', (code) => {
+                        if (code === 0) {
+                            logToRenderer('SUCESSO', 'Instalação via CLI concluída');
+                            resolve();
+                        } else {
+                            reject(new Error(`CLI falhou com código ${code}`));
+                        }
+                    });
+                    
+                    child.on('error', reject);
+                });
+            } else {
+                throw new Error('Nenhum método de instalação disponível');
+            }
+        }
         
-        await new Promise((resolve, reject) => {
-            const child = fork(
-                playwrightCliPath,
-                ['install', 'chromium', '--with-deps'],
-                { 
-                    stdio: 'pipe', 
-                    env: { 
-                        ...process.env, 
-                        PLAYWRIGHT_BROWSERS_PATH: LOCAL_BROWSERS_PATH 
-                    } 
-                }
-            );
-            
-            child.stdout.on('data', (data) => {
-                const msg = data.toString().trim();
-                if (msg) logToRenderer('DEBUG', `[Install]: ${msg}`);
-            });
-            
-            child.stderr.on('data', (data) => {
-                const msg = data.toString().trim();
-                if (msg) logToRenderer('DEBUG', `[Install Error]: ${msg}`);
-            });
-            
-            child.on('close', (code) => {
-                if (code === 0) {
-                    logToRenderer('SUCESSO', 'Instalação do Chromium concluída.');
-                    resolve();
-                } else {
-                    reject(new Error(`Instalação falhou com código ${code}`));
-                }
-            });
-            
-            child.on('error', reject);
-        });
-
-        // Aguarda um momento para garantir que os arquivos foram escritos
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Aguarda a instalação ser finalizada
+        await new Promise(resolve => setTimeout(resolve, 2000));
         
-        // Re-verifica após instalação
+        // Re-verifica após instalação (vai procurar em todos os lugares novamente)
         const status = await checkPlaywrightBrowser();
         
         if (status === 'OK') {
-            logToRenderer('SUCESSO', 'Navegador instalado e verificado com sucesso!');
-            if (mainWindow) mainWindow.webContents.send('update-browser-status-from-main', 'OK');
+            logToRenderer('SUCESSO', `Navegador instalado e verificado com sucesso!`);
+            logToRenderer('INFO', `Localização: ${activeBrowserExecutablePath}`);
+            
+            if (mainWindow) {
+                mainWindow.webContents.send('update-browser-status-from-main', 'OK');
+                
+                // Notifica o sucesso
+                new Notification({
+                    title: 'Instalação Concluída',
+                    body: 'O navegador foi instalado com sucesso!',
+                    icon: path.join(__dirname, '../assets/icon.png')
+                }).show();
+            }
+            
             updateAutomationStatusInRenderer('Navegador de automação pronto.', null, false);
         } else {
-            throw new Error('Instalação concluída mas verificação falhou');
+            throw new Error('Instalação concluída mas o navegador não foi encontrado');
         }
-
+        
     } catch (error) {
         logToRenderer('ERRO', `Falha na instalação: ${error.message}`);
+        
         if (mainWindow) mainWindow.webContents.send('update-browser-status-from-main', 'FALTANDO');
         updateAutomationStatusInRenderer('Falha ao instalar navegador.', null, false);
-        dialog.showErrorBox("Erro de Instalação", `Não foi possível instalar o navegador: ${error.message}`);
+        
+        // Oferece opções ao usuário
+        const result = await dialog.showMessageBox(mainWindow, {
+            type: 'error',
+            title: 'Instalação do Navegador',
+            message: 'Não foi possível instalar o navegador automaticamente',
+            detail: error.message,
+            buttons: ['Tentar Novamente', 'Instalar Manualmente', 'Cancelar'],
+            defaultId: 0
+        });
+        
+        if (result.response === 0) {
+            // Tentar novamente
+            setTimeout(() => {
+                mainWindow.webContents.send('retry-browser-installation');
+            }, 1000);
+        } else if (result.response === 1) {
+            // Instruções manuais
+            showManualInstallInstructions();
+        }
     }
 });
+
+// Função auxiliar para encontrar o CLI do Playwright
+function findPlaywrightCLI() {
+    const possiblePaths = [];
+    
+    if (app.isPackaged) {
+        possiblePaths.push(
+            path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'playwright', 'cli.js'),
+            path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'playwright-core', 'cli.js')
+        );
+    }
+    
+    try {
+        possiblePaths.push(require.resolve('playwright/cli.js'));
+    } catch (e) {}
+    
+    try {
+        possiblePaths.push(require.resolve('playwright-core/cli.js'));
+    } catch (e) {}
+    
+    for (const cliPath of possiblePaths) {
+        if (cliPath && fs.existsSync(cliPath)) {
+            return cliPath;
+        }
+    }
+    
+    return null;
+}
+
+// Função para mostrar instruções de instalação manual
+function showManualInstallInstructions() {
+    const instructions = process.platform === 'win32'
+        ? `1. Abra o Prompt de Comando (cmd)\n2. Execute: npm install -g playwright\n3. Execute: npx playwright install chromium\n4. Reinicie o aplicativo`
+        : `1. Abra o Terminal\n2. Execute: npm install -g playwright\n3. Execute: npx playwright install chromium\n4. Reinicie o aplicativo`;
+    
+    dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: 'Instalação Manual',
+        message: 'Siga estas instruções para instalar manualmente:',
+        detail: instructions,
+        buttons: ['OK']
+    });
+}
 
 
 // --- Telegram Notification ---
@@ -325,30 +530,40 @@ async function launchPlaywright() {
     logToRenderer('INFO', 'Iniciando navegador de automação...');
     updateAutomationStatusInRenderer('Iniciando navegador de automação...');
     
-    // Re-verifica o caminho caso tenha sido instalado após o início do app
-    await checkPlaywrightBrowser(); 
-
+    // Verifica novamente o caminho (pode ter sido instalado enquanto o app estava rodando)
     if (!activeBrowserExecutablePath) {
-        throw new Error("Nenhum executável do navegador Playwright foi encontrado.");
+        await checkPlaywrightBrowser();
+    }
+    
+    if (!activeBrowserExecutablePath) {
+        throw new Error("Navegador Chromium não encontrado. Por favor, instale-o nas configurações.");
     }
     
     try {
         const playwright = require('playwright');
         logToRenderer('DEBUG', `Tentando iniciar o navegador em: ${activeBrowserExecutablePath}`);
 
-        // Se estamos usando a instalação local, garante que a variável está definida
-        if (activeBrowserExecutablePath.includes(LOCAL_BROWSERS_PATH)) {
-            process.env.PLAYWRIGHT_BROWSERS_PATH = LOCAL_BROWSERS_PATH;
-        }
-
         playwrightBrowser = await playwright.chromium.launch({
             headless: true,
-            executablePath: activeBrowserExecutablePath
+            executablePath: activeBrowserExecutablePath,
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
+
         logToRenderer('SUCESSO', 'Playwright browser iniciado com sucesso.');
         return playwrightBrowser;
+
     } catch (launchError) {
         logToRenderer('ERRO', `Falha ao iniciar Playwright browser: ${launchError.message}`);
+
+        // Tenta encontrar em outro lugar
+        logToRenderer('INFO', 'Tentando localizar navegador em outros diretórios...');
+        await checkPlaywrightBrowser();
+
+        if (activeBrowserExecutablePath) {
+          // Tenta novamente com o novo caminho
+          return launchPlaywright();
+        }
+
         if (mainWindow) mainWindow.webContents.send('update-browser-status-from-main', 'FALTANDO');
         throw launchError;
     }

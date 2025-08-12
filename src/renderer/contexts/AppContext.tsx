@@ -1,6 +1,6 @@
 // Arquivo agora em: src/renderer/contexts/AppContext.tsx
 import React, { createContext, useState, useCallback, ReactNode, useEffect } from 'react';
-import { LogEntry, View, Settings, LogLevel, Schedule, AutomationMode, AutomationState, BrowserStatus, UserCredentials } from '../types'; // Ajustado
+import { LogEntry, View, Settings, LogLevel, Schedule, AutomationMode, AutomationState, UserCredentials } from '../types'; // Ajustado
 import { INITIAL_SETTINGS, INITIAL_VIEW, INITIAL_SCHEDULE, INITIAL_AUTOMATION_MODE } from '../constants'; // Ajustado
 
 interface AppContextType {

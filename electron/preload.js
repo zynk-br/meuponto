@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Automation Browser (Playwright) Management
   checkAutomationBrowser: () => ipcRenderer.invoke('check-automation-browser'),
+  getBrowserPath: () => ipcRenderer.invoke('get-browser-path'),
   reinstallAutomationBrowser: () => ipcRenderer.send('reinstall-automation-browser'),
   onBrowserStatusUpdate: (callback) => {
     const handler = (_event, status) => callback(status);
