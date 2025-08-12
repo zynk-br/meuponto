@@ -7,7 +7,7 @@ const keytar = require('keytar');
 const { expect } = require('playwright/test');
 const https = require('https');
 const { autoUpdater } = require('electron-updater');
-const { exec, fork, execSync } = require('child_process');
+const { exec, fork, execSync, spawn } = require('child_process');
 const util = require('util');
 
 const execPromise = util.promisify(exec);
@@ -349,7 +349,50 @@ ipcMain.on('reinstall-automation-browser', async () => {
                     child.on('error', reject);
                 });
             } else {
-                throw new Error('Nenhum método de instalação disponível');
+                // Método 3: Usar a API direta do Playwright via playwright-core
+                logToRenderer('INFO', 'Tentando instalação usando API direta do Playwright...');
+                
+                try {
+                    // Define o caminho dos browsers antes da instalação
+                    process.env.PLAYWRIGHT_BROWSERS_PATH = LOCAL_BROWSERS_PATH;
+                    
+                    // Tenta usar playwright-core diretamente para instalar
+                    let playwrightCore;
+                    try {
+                        playwrightCore = require('playwright-core');
+                    } catch (e) {
+                        // Se não tem playwright-core, usa playwright que re-exporta
+                        playwrightCore = require('playwright');
+                    }
+                    
+                    // Tenta diferentes caminhos para a API de instalação
+                    let installApi;
+                    try {
+                        installApi = require('playwright-core/lib/server/registry');
+                    } catch (e) {
+                        try {
+                            installApi = require('playwright/lib/server/registry');
+                        } catch (e2) {
+                            throw new Error('API de instalação não encontrada');
+                        }
+                    }
+                    
+                    // Instala o Chromium
+                    const registry = installApi.registry || installApi;
+                    if (registry && registry.installDeps) {
+                        await registry.installDeps(['chromium']);
+                        logToRenderer('SUCESSO', 'Instalação via API direta concluída');
+                    } else {
+                        throw new Error('Método installDeps não disponível');
+                    }
+                    
+                } catch (apiError) {
+                    logToRenderer('ERRO', `API direta falhou: ${apiError.message}`);
+                    
+                    // Método 4: Download manual usando spawn
+                    logToRenderer('INFO', 'Tentando instalação manual...');
+                    await installChromiumManually(LOCAL_BROWSERS_PATH);
+                }
             }
         }
         
@@ -412,27 +455,109 @@ function findPlaywrightCLI() {
     const possiblePaths = [];
     
     if (app.isPackaged) {
+        // No app empacotado, procura nos node_modules desempacotados
+        // O cli.js está na raiz do playwright e importa ./lib/program
         possiblePaths.push(
             path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'playwright', 'cli.js'),
             path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'playwright-core', 'cli.js')
         );
     }
     
+    // Em desenvolvimento, tenta encontrar usando require.resolve
     try {
-        possiblePaths.push(require.resolve('playwright/cli.js'));
-    } catch (e) {}
+        const playwrightPkg = require.resolve('playwright/package.json');
+        const playwrightDir = path.dirname(playwrightPkg);
+        possiblePaths.push(path.join(playwrightDir, 'cli.js'));
+    } catch (e) {
+        logToRenderer('DEBUG', `Não foi possível resolver playwright/package.json: ${e.message}`);
+    }
     
     try {
-        possiblePaths.push(require.resolve('playwright-core/cli.js'));
-    } catch (e) {}
+        const playwrightCorePkg = require.resolve('playwright-core/package.json');
+        const playwrightCoreDir = path.dirname(playwrightCorePkg);
+        possiblePaths.push(path.join(playwrightCoreDir, 'cli.js'));
+    } catch (e) {
+        logToRenderer('DEBUG', `Não foi possível resolver playwright-core/package.json: ${e.message}`);
+    }
     
+    // Fallback: procura usando caminhos relativos a partir dos módulos principais
+    try {
+        const playwrightMain = require.resolve('playwright');
+        const playwrightDir = path.dirname(playwrightMain);
+        possiblePaths.push(path.join(playwrightDir, 'cli.js'));
+    } catch (e) {
+        logToRenderer('DEBUG', `Não foi possível resolver playwright: ${e.message}`);
+    }
+    
+    try {
+        const playwrightCoreMain = require.resolve('playwright-core');
+        const playwrightCoreDir = path.dirname(playwrightCoreMain);
+        possiblePaths.push(path.join(playwrightCoreDir, 'cli.js'));
+    } catch (e) {
+        logToRenderer('DEBUG', `Não foi possível resolver playwright-core: ${e.message}`);
+    }
+    
+    // Verifica se algum dos caminhos existe
     for (const cliPath of possiblePaths) {
         if (cliPath && fs.existsSync(cliPath)) {
+            logToRenderer('DEBUG', `CLI do Playwright encontrado em: ${cliPath}`);
             return cliPath;
         }
     }
     
+    logToRenderer('DEBUG', `Nenhum CLI do Playwright encontrado. Caminhos testados: ${possiblePaths.join(', ')}`);
     return null;
+}
+
+// Função para instalação manual do Chromium como último recurso
+async function installChromiumManually(installPath) {
+    logToRenderer('INFO', 'Iniciando instalação manual do Chromium via spawn...');
+    
+    return new Promise((resolve, reject) => {
+        // Usa spawn diretamente, que é mais confiável que fork com CLIs
+        const npmCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+        const child = spawn(npmCommand, ['playwright', 'install', 'chromium'], {
+            env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: installPath },
+            stdio: ['pipe', 'pipe', 'pipe']
+        });
+        
+        let stdout = '';
+        let stderr = '';
+        
+        child.stdout.on('data', (data) => {
+            const output = data.toString();
+            stdout += output;
+            logToRenderer('DEBUG', `Instalação stdout: ${output.trim()}`);
+        });
+        
+        child.stderr.on('data', (data) => {
+            const output = data.toString();
+            stderr += output;
+            // Não loga como erro se for apenas warning/info
+            if (output.toLowerCase().includes('error')) {
+                logToRenderer('ERRO', `Instalação stderr: ${output.trim()}`);
+            } else {
+                logToRenderer('DEBUG', `Instalação info: ${output.trim()}`);
+            }
+        });
+        
+        child.on('close', (code) => {
+            if (code === 0) {
+                logToRenderer('SUCESSO', 'Instalação manual via spawn concluída com sucesso');
+                resolve();
+            } else {
+                const errorMsg = `Instalação falhou (código ${code}). stderr: ${stderr.trim()}`;
+                logToRenderer('ERRO', errorMsg);
+                reject(new Error(errorMsg));
+            }
+        });
+        
+        child.on('error', (error) => {
+            const errorMsg = `Erro ao executar npx: ${error.message}`;
+            logToRenderer('ERRO', errorMsg);
+            reject(new Error(errorMsg));
+        });
+    });
 }
 
 // Função para mostrar instruções de instalação manual
