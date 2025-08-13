@@ -4,7 +4,7 @@ import { useAppContext } from '../hooks/useAppContext'; // Ajustado
 
 const Header: React.FC = () => {
   const [currentTime, setCurrentTime] = useState('');
-  const { setIsSettingsModalOpen, toggleTheme, theme } = useAppContext();
+  const { setIsSettingsModalOpen, toggleTheme, theme, settings, updateSettings } = useAppContext();
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -24,6 +24,14 @@ const Header: React.FC = () => {
         {currentTime ? `${currentTime} (Brasília)` : 'Carregando relógio...'}
       </div>
       <div className="flex items-center space-x-4">
+        <button
+          onClick={() => updateSettings({ showLogConsole: !settings.showLogConsole })}
+          className="p-2 rounded-md hover:bg-primary-700 dark:hover:bg-primary-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
+          aria-label={settings.showLogConsole ? 'Esconder console de logs' : 'Mostrar console de logs'}
+          title={settings.showLogConsole ? 'Esconder Console' : 'Mostrar Console'}
+        >
+          <i className={settings.showLogConsole ? "fas fa-eye-slash" : "fas fa-terminal"}></i>
+        </button>
         <button
           onClick={toggleTheme}
           className="p-2 rounded-md hover:bg-primary-700 dark:hover:bg-primary-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
