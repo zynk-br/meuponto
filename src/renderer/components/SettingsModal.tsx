@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Modal from './Modal';
 import { useAppContext } from '../hooks/useAppContext';
-import { BrowserStatus, LogLevel } from '../types';
+import { BrowserStatus, LogLevel, View } from '../types';
 
 const SettingsModal: React.FC = () => {
   const {
@@ -10,7 +10,9 @@ const SettingsModal: React.FC = () => {
     isSettingsModalOpen,
     setIsSettingsModalOpen,
     setIsTelegramTutorialModalOpen,
-    addLog
+    addLog,
+    setCurrentView,
+    setCurrentUserCredentials
   } = useAppContext();
 
   const [localSettings, setLocalSettings] = useState(settings);
@@ -48,6 +50,20 @@ const SettingsModal: React.FC = () => {
   const handleCancel = () => {
     // Simplesmente fecha o modal. O useEffect cuidará de resetar o estado local na próxima vez.
     setIsSettingsModalOpen(false);
+  };
+
+  const handleLogout = () => {
+    // Confirma se o usuário quer realmente sair
+    const confirmed = window.confirm('Tem certeza que deseja sair e voltar à tela de login?');
+    if (confirmed) {
+      addLog(LogLevel.INFO, "Usuário fez logout - voltando à tela de login.");
+      // Limpa as credenciais do usuário atual
+      setCurrentUserCredentials(null);
+      // Volta para a tela de login
+      setCurrentView(View.LOGIN);
+      // Fecha o modal
+      setIsSettingsModalOpen(false);
+    }
   };
 
   const handleReinstallBrowser = () => {
@@ -197,6 +213,23 @@ const SettingsModal: React.FC = () => {
             >
               <i className="fas fa-sync-alt mr-2"></i>
               {settings.automationBrowserStatus === BrowserStatus.MISSING ? "Instalar Navegador" : "Reinstalar/Verificar Navegador"}
+            </button>
+          </div>
+        </div>
+
+        {/* Logout Section */}
+        <div className="p-4 border border-red-200 dark:border-red-700 rounded-lg bg-red-50 dark:bg-red-900/20">
+          <h3 className="text-lg font-semibold mb-3 text-red-600 dark:text-red-400">Sessão</h3>
+          <div className="space-y-3">
+            <p className="text-sm text-secondary-700 dark:text-secondary-300">
+              Clique no botão abaixo para sair da sessão atual e voltar à tela de login.
+            </p>
+            <button
+              onClick={handleLogout}
+              className="w-full px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 dark:bg-red-500 dark:hover:bg-red-600"
+            >
+              <i className="fas fa-sign-out-alt mr-2"></i>
+              Sair / Fazer Logout
             </button>
           </div>
         </div>

@@ -332,6 +332,96 @@ function findExecutableInPath(command) {
   });
 }
 
+// Função para verificar Node.js e NPM
+async function checkNodeAndNpm() {
+  logToRenderer('INFO', 'Verificando Node.js e NPM...');
+  
+  try {
+    // Verifica Node.js
+    const nodeVersion = await new Promise((resolve, reject) => {
+      exec('node --version', (error, stdout) => {
+        if (error) {
+          reject(new Error('Node.js não encontrado'));
+        } else {
+          resolve(stdout.trim());
+        }
+      });
+    });
+
+    // Verifica NPM
+    const npmVersion = await new Promise((resolve, reject) => {
+      exec('npm --version', (error, stdout) => {
+        if (error) {
+          reject(new Error('NPM não encontrado'));
+        } else {
+          resolve(stdout.trim());
+        }
+      });
+    });
+
+    logToRenderer('SUCESSO', `Node.js ${nodeVersion} encontrado`);
+    logToRenderer('SUCESSO', `NPM ${npmVersion} encontrado`);
+
+    // Verifica se as versões são compatíveis (Node.js >= 18.0.0)
+    const nodeMajorVersion = parseInt(nodeVersion.replace('v', '').split('.')[0]);
+    if (nodeMajorVersion < 18) {
+      logToRenderer('AVISO', `Node.js ${nodeVersion} está desatualizado. Recomendado: v18 ou superior.`);
+      return {
+        status: 'OUTDATED',
+        nodeVersion,
+        npmVersion,
+        message: `Node.js ${nodeVersion} está desatualizado. Recomendado: v18 ou superior.`
+      };
+    }
+
+    return {
+      status: 'OK',
+      nodeVersion,
+      npmVersion,
+      message: `Node.js ${nodeVersion} e NPM ${npmVersion} estão OK`
+    };
+
+  } catch (error) {
+    logToRenderer('ERRO', `Erro na verificação: ${error.message}`);
+    return {
+      status: 'MISSING',
+      nodeVersion: null,
+      npmVersion: null,
+      message: error.message
+    };
+  }
+}
+
+// Handler para verificação do Node.js/NPM
+ipcMain.handle('check-node-npm', async () => {
+  return await checkNodeAndNpm();
+});
+
+// Função para abrir a página de download do Node.js
+async function openNodeJSDownloadPage() {
+  const { shell } = require('electron');
+  const url = 'https://nodejs.org/en/download/';
+  
+  try {
+    await shell.openExternal(url);
+    logToRenderer('INFO', 'Página de download do Node.js aberta no navegador padrão.');
+    return { success: true, message: 'Página aberta com sucesso' };
+  } catch (error) {
+    logToRenderer('ERRO', `Erro ao abrir página de download: ${error.message}`);
+    return { success: false, message: error.message };
+  }
+}
+
+// Handler para abrir página de download do Node.js
+ipcMain.handle('open-nodejs-download', async () => {
+  return await openNodeJSDownloadPage();
+});
+
+// Handler para obter a versão da aplicação
+ipcMain.handle('get-app-version', () => {
+  return app.getVersion();
+});
+
 ipcMain.handle('check-automation-browser', async () => {
   return await checkPlaywrightBrowser();
 });

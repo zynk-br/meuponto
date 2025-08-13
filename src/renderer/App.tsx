@@ -5,6 +5,7 @@ import { useAppContext } from './hooks/useAppContext'; // Ajustado
 
 //import CustomTitleBar from './components/CustomTitleBar'; // Ajustado
 import Header from './components/Header'; // Ajustado
+import Footer from './components/Footer'; // Componente de rodapé
 import LogConsole from './components/LogConsole'; // Ajustado
 import SettingsModal from './components/SettingsModal'; // Ajustado
 import TelegramTutorialModal from './components/TelegramTutorialModal'; // Ajustado
@@ -12,6 +13,7 @@ import UpdateNotification from './components/UpdateNotification';
 
 import LoadingView from './views/LoadingView'; // Ajustado
 import NodeMissingView from './views/NodeMissingView'; // Ajustado
+import NodeInstallView from './views/NodeInstallView'; // Nova view para instalação do Node.js
 import LoginView from './views/LoginView'; // Ajustado
 import AppView from './views/AppView'; // Ajustado
 
@@ -26,6 +28,8 @@ const ViewRenderer: React.FC = () => {
       return <LoadingView />;
     case View.NODE_MISSING:
       return <NodeMissingView />; // This view might become obsolete or less critical with electron-vite
+    case View.NODE_INSTALL:
+      return <NodeInstallView />; // Nova view para instalação do Node.js
     case View.LOGIN:
       return <LoginView />;
     case View.APP_VIEW:
@@ -46,6 +50,7 @@ const AppContent: React.FC = () => {
         <ViewRenderer />
       </main>
       <LogConsole isVisible={settings.showLogConsole} />
+      <Footer />
       <SettingsModal />
       <TelegramTutorialModal />
       <UpdateNotification />

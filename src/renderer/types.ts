@@ -16,6 +16,7 @@ export interface LogEntry {
 export enum View {
   LOADING_PREREQUISITES = "LOADING_PREREQUISITES",
   NODE_MISSING = "NODE_MISSING", 
+  NODE_INSTALL = "NODE_INSTALL",
   LOGIN = "LOGIN",
   APP_VIEW = "APP_VIEW",
 }
@@ -24,6 +25,20 @@ export enum BrowserStatus {
   LOADING = "CARREGANDO",
   OK = "OK",
   MISSING = "AUSENTE", 
+}
+
+export enum NodeStatus {
+  LOADING = "CARREGANDO",
+  OK = "OK",
+  OUTDATED = "DESATUALIZADO",
+  MISSING = "AUSENTE",
+}
+
+export interface NodeNpmCheck {
+  status: 'OK' | 'OUTDATED' | 'MISSING';
+  nodeVersion: string | null;
+  npmVersion: string | null;
+  message: string;
 }
 
 export interface Settings {
@@ -82,6 +97,11 @@ export interface ElectronAPI {
   setCredential: (account: string, password?: string) => void;
   deleteCredential: (account: string) => void;
 
+  checkNodeNpm: () => Promise<NodeNpmCheck>;
+  openNodeJSDownload: () => Promise<{success: boolean, message: string}>;
+  
+  getAppVersion: () => Promise<string>;
+  
   checkAutomationBrowser: () => Promise<BrowserStatus>;
   getBrowserPath: () => Promise<string>;
   reinstallAutomationBrowser: () => void;

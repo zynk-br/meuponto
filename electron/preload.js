@@ -16,6 +16,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setCredential: (account, password) => ipcRenderer.send('set-credential', { account, password }),
   deleteCredential: (account) => ipcRenderer.send('delete-credential', account),
 
+  // Node.js and NPM verification
+  checkNodeNpm: () => ipcRenderer.invoke('check-node-npm'),
+  openNodeJSDownload: () => ipcRenderer.invoke('open-nodejs-download'),
+  
+  // App info
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+
   // Automation Browser (Playwright) Management
   checkAutomationBrowser: () => ipcRenderer.invoke('check-automation-browser'),
   getBrowserPath: () => ipcRenderer.invoke('get-browser-path'),
