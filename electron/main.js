@@ -332,27 +332,103 @@ function findExecutableInPath(command) {
   });
 }
 
+// Função para encontrar Node.js/NPM com PATH expandido
+function getExpandedPath() {
+  let pathEnv = process.env.PATH || '';
+  
+  // Adiciona caminhos comuns onde Node.js pode estar instalado
+  let commonPaths = [
+    '/usr/local/bin',
+    '/usr/bin',
+    '/bin',
+    '/opt/homebrew/bin', // Homebrew no Apple Silicon
+    '/usr/local/Cellar/node/*/bin', // Homebrew Intel
+    process.env.HOME + '/.nvm/current/bin', // NVM current
+    process.env.NVM_BIN, // NVM_BIN variable
+    '/usr/local/lib/nodejs/node-*/bin', // Manual install Linux
+    process.env.HOME + '/.local/bin', // Local user installs
+    '/snap/bin', // Snap packages (Linux)
+  ].filter(Boolean); // Remove null/undefined entries
+  
+  // Procura por versões específicas do NVM se existirem
+  try {
+    const nvmDir = process.env.NVM_DIR || (process.env.HOME + '/.nvm');
+    const versionsDir = path.join(nvmDir, 'versions', 'node');
+    
+    if (fs.existsSync(versionsDir)) {
+      const versions = fs.readdirSync(versionsDir);
+      for (const version of versions) {
+        const versionBinPath = path.join(versionsDir, version, 'bin');
+        if (fs.existsSync(versionBinPath)) {
+          commonPaths.push(versionBinPath);
+        }
+      }
+    }
+  } catch (e) {
+    // Ignora erros na busca por versões NVM
+    logToRenderer('DEBUG', `Erro ao buscar versões NVM: ${e.message}`);
+  }
+  
+  // No Windows
+  if (process.platform === 'win32') {
+    commonPaths.push(
+      'C:\\Program Files\\nodejs',
+      'C:\\Program Files (x86)\\nodejs',
+      process.env.APPDATA + '\\npm',
+      process.env.USERPROFILE + '\\AppData\\Roaming\\npm',
+      process.env.USERPROFILE + '\\scoop\\apps\\nodejs\\current', // Scoop
+      'C:\\tools\\nodejs' // Chocolatey
+    );
+  }
+  
+  // Adiciona os caminhos comuns ao PATH se não estiverem lá
+  const pathSeparator = process.platform === 'win32' ? ';' : ':';
+  const existingPaths = pathEnv.split(pathSeparator);
+  
+  for (const commonPath of commonPaths) {
+    if (commonPath && !existingPaths.includes(commonPath)) {
+      pathEnv += pathSeparator + commonPath;
+    }
+  }
+  
+  logToRenderer('DEBUG', `Caminhos adicionais incluídos: ${commonPaths.join(', ')}`);
+  return pathEnv;
+}
+
 // Função para verificar Node.js e NPM
 async function checkNodeAndNpm() {
   logToRenderer('INFO', 'Verificando Node.js e NPM...');
+  logToRenderer('DEBUG', `PATH atual: ${process.env.PATH}`);
+  
+  // Expande o PATH para incluir locais comuns do Node.js
+  const expandedPath = getExpandedPath();
+  logToRenderer('DEBUG', `PATH expandido: ${expandedPath}`);
   
   try {
-    // Verifica Node.js
+    // Verifica Node.js com PATH expandido
     const nodeVersion = await new Promise((resolve, reject) => {
-      exec('node --version', (error, stdout) => {
+      exec('node --version', { 
+        env: { ...process.env, PATH: expandedPath },
+        timeout: 10000 // 10 segundos de timeout
+      }, (error, stdout, stderr) => {
         if (error) {
-          reject(new Error('Node.js não encontrado'));
+          logToRenderer('DEBUG', `Erro node --version: ${error.message}, stderr: ${stderr}`);
+          reject(new Error('Node.js não encontrado no PATH'));
         } else {
           resolve(stdout.trim());
         }
       });
     });
 
-    // Verifica NPM
+    // Verifica NPM com PATH expandido
     const npmVersion = await new Promise((resolve, reject) => {
-      exec('npm --version', (error, stdout) => {
+      exec('npm --version', { 
+        env: { ...process.env, PATH: expandedPath },
+        timeout: 10000 // 10 segundos de timeout
+      }, (error, stdout, stderr) => {
         if (error) {
-          reject(new Error('NPM não encontrado'));
+          logToRenderer('DEBUG', `Erro npm --version: ${error.message}, stderr: ${stderr}`);
+          reject(new Error('NPM não encontrado no PATH'));
         } else {
           resolve(stdout.trim());
         }
@@ -383,13 +459,98 @@ async function checkNodeAndNpm() {
 
   } catch (error) {
     logToRenderer('ERRO', `Erro na verificação: ${error.message}`);
+    
+    // Tenta uma abordagem alternativa - verifica arquivos executáveis diretamente
+    logToRenderer('DEBUG', 'Tentando verificação alternativa...');
+    return await alternativeNodeCheck(expandedPath);
+  }
+}
+
+// Função alternativa para verificar Node.js diretamente nos caminhos
+async function alternativeNodeCheck(pathEnv) {
+  const paths = pathEnv.split(process.platform === 'win32' ? ';' : ':');
+  const nodeExe = process.platform === 'win32' ? 'node.exe' : 'node';
+  const npmExe = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  
+  let nodeFound = false;
+  let npmFound = false;
+  let nodeVersion = null;
+  let npmVersion = null;
+  
+  for (const dir of paths) {
+    if (!dir) continue;
+    
+    try {
+      const nodePath = path.join(dir, nodeExe);
+      const npmPath = path.join(dir, npmExe);
+      
+      // Verifica se os arquivos existem
+      if (!nodeFound && fs.existsSync(nodePath)) {
+        try {
+          const version = await new Promise((resolve, reject) => {
+            exec(`"${nodePath}" --version`, { timeout: 5000 }, (error, stdout) => {
+              if (error) reject(error);
+              else resolve(stdout.trim());
+            });
+          });
+          nodeVersion = version;
+          nodeFound = true;
+          logToRenderer('DEBUG', `Node.js encontrado em: ${nodePath} (${version})`);
+        } catch (e) {
+          logToRenderer('DEBUG', `Node.js existe em ${nodePath} mas falhou ao executar: ${e.message}`);
+        }
+      }
+      
+      if (!npmFound && fs.existsSync(npmPath)) {
+        try {
+          const version = await new Promise((resolve, reject) => {
+            exec(`"${npmPath}" --version`, { timeout: 5000 }, (error, stdout) => {
+              if (error) reject(error);
+              else resolve(stdout.trim());
+            });
+          });
+          npmVersion = version;
+          npmFound = true;
+          logToRenderer('DEBUG', `NPM encontrado em: ${npmPath} (${version})`);
+        } catch (e) {
+          logToRenderer('DEBUG', `NPM existe em ${npmPath} mas falhou ao executar: ${e.message}`);
+        }
+      }
+      
+      if (nodeFound && npmFound) break;
+      
+    } catch (e) {
+      // Ignora erros de path inválido
+      continue;
+    }
+  }
+  
+  if (!nodeFound || !npmFound) {
     return {
       status: 'MISSING',
-      nodeVersion: null,
-      npmVersion: null,
-      message: error.message
+      nodeVersion,
+      npmVersion,
+      message: `${!nodeFound ? 'Node.js' : ''}${!nodeFound && !npmFound ? ' e ' : ''}${!npmFound ? 'NPM' : ''} não encontrado${!nodeFound || !npmFound ? ' no sistema' : ''}`
     };
   }
+  
+  // Verifica versão do Node.js
+  const nodeMajorVersion = parseInt(nodeVersion.replace('v', '').split('.')[0]);
+  if (nodeMajorVersion < 18) {
+    return {
+      status: 'OUTDATED',
+      nodeVersion,
+      npmVersion,
+      message: `Node.js ${nodeVersion} está desatualizado. Recomendado: v18 ou superior.`
+    };
+  }
+  
+  return {
+    status: 'OK',
+    nodeVersion,
+    npmVersion,
+    message: `Node.js ${nodeVersion} e NPM ${npmVersion} estão OK`
+  };
 }
 
 // Handler para verificação do Node.js/NPM
