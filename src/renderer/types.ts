@@ -48,6 +48,7 @@ export interface Settings {
   theme: 'light' | 'dark';
   saveLoginDetails: boolean;
   savedFolha: string;
+  detailedLogs?: boolean;
 }
 
 export interface TimeEntry {

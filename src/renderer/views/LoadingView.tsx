@@ -11,7 +11,7 @@ const LoadingView: React.FC = () => {
   const [nodeCheck, setNodeCheck] = useState<NodeNpmCheck | null>(null);
 
   useEffect(() => {
-    addLog(LogLevel.INFO, "Aplicação Electron iniciando...");
+    addLog(LogLevel.INFO, "Iniciando MeuPonto...");
     
     // Primeiro, verifica Node.js e NPM
     const checkNodeFirst = async () => {
@@ -37,7 +37,6 @@ const LoadingView: React.FC = () => {
           
           // Se Node.js está OK ou OUTDATED, continua com verificação do Playwright
           setStatusMessage("Verificando navegador de automação (Playwright)...");
-          addLog(LogLevel.INFO, "Verificando status do navegador de automação (Playwright)...");
           
           if (settings.automationBrowserStatus === BrowserStatus.LOADING || settings.automationBrowserStatus === BrowserStatus.MISSING) {
              const status = await window.electronAPI.checkAutomationBrowser();
