@@ -143,6 +143,15 @@ ipcMain.on('save-settings', (event, settings) => {
   store.set('userSettings', settings);
 });
 
+// --- Schedule Persistence ---
+ipcMain.handle('load-schedule', async () => {
+  return store.get('userSchedule');
+});
+
+ipcMain.on('save-schedule', (event, schedule) => {
+  store.set('userSchedule', schedule);
+});
+
 // Configuração padrão para logs detalhados
 function getDetailedLogsEnabled() {
   const userSettings = store.get('userSettings', {});

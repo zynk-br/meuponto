@@ -5,8 +5,35 @@ import { DayOfWeek, LogLevel, TimeEntry, Schedule, AutomationMode, BrowserStatus
 import { DAYS_OF_WEEK } from '../constants'; // Ajustado
 
 const DayRowEditor: React.FC<{ day: DayOfWeek, entry: TimeEntry, onChange: (newEntry: TimeEntry) => void, readonly: boolean }> = ({ day, entry, onChange, readonly }) => {
+
+  // Função auxiliar para adicionar horas a um horário
+  const addHoursToTime = (timeStr: string, hoursToAdd: number, minutesToAdd: number = 0): string => {
+    if (!timeStr || !timeStr.includes(':')) return '';
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    if (isNaN(hours) || isNaN(minutes)) return '';
+
+    let totalMinutes = hours * 60 + minutes + hoursToAdd * 60 + minutesToAdd;
+    const newHours = Math.floor(totalMinutes / 60) % 24;
+    const newMinutes = totalMinutes % 60;
+    return `${String(newHours).padStart(2, '0')}:${String(newMinutes).padStart(2, '0')}`;
+  };
+
   const handleTimeChange = (field: keyof Omit<TimeEntry, 'feriado'>, value: string) => {
-    onChange({ ...entry, [field]: value });
+    const updatedEntry = { ...entry, [field]: value };
+
+    // REGRA 1: Quando preencher Entrada1, calcular automaticamente Saída2 (Entrada1 + 9h)
+    if (field === 'entrada1' && value) {
+      const calculatedSaida2 = addHoursToTime(value, 9, 0); // 8h de trabalho + 1h de almoço
+      updatedEntry.saida2 = calculatedSaida2;
+    }
+
+    // REGRA 2: Quando preencher Saída1, calcular automaticamente Entrada2 (Saída1 + 1h)
+    if (field === 'saida1' && value) {
+      const calculatedEntrada2 = addHoursToTime(value, 1, 0); // 1h de almoço
+      updatedEntry.entrada2 = calculatedEntrada2;
+    }
+
+    onChange(updatedEntry);
   };
 
   const handleFeriadoChange = (checked: boolean) => {

@@ -94,6 +94,9 @@ export interface ElectronAPI {
   loadSettings: () => Promise<Partial<Settings> | undefined>;
   saveSettings: (settings: Partial<Settings>) => void;
 
+  loadSchedule: () => Promise<Schedule | undefined>;
+  saveSchedule: (schedule: Schedule) => void;
+
   getCredential: (account: string) => Promise<string | null>;
   setCredential: (account: string, password?: string) => void;
   deleteCredential: (account: string) => void;

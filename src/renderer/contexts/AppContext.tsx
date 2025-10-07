@@ -82,10 +82,18 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         }
       });
 
+      // Carrega schedule salvo
+      window.electronAPI.loadSchedule().then(storedSchedule => {
+        if (storedSchedule) {
+          addLogCallback(LogLevel.INFO, "Grade de horários carregada do armazenamento.");
+          setSchedule(storedSchedule);
+        }
+      });
+
       const removeLogListener = window.electronAPI.onLogFromMain(({level, message}) => {
         addLogCallback(level, message, true);
       });
-      
+
       const removeStatusListener = window.electronAPI.onAutomationStatusUpdate((statusUpdate) => {
         setAutomationStateInternal(prev => ({...prev, ...statusUpdate}));
       });
@@ -123,14 +131,25 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   }, [updateSettingsCallback]);
 
   const updateScheduleEntryCallback = useCallback((day: keyof Schedule, entry: Partial<typeof INITIAL_SCHEDULE[keyof Schedule]>) => {
-    setSchedule(prevSchedule => ({
-      ...prevSchedule,
-      [day]: { ...prevSchedule[day], ...entry },
-    }));
+    setSchedule(prevSchedule => {
+      const updatedSchedule = {
+        ...prevSchedule,
+        [day]: { ...prevSchedule[day], ...entry },
+      };
+      // Salva no electron-store
+      if (window.electronAPI) {
+        window.electronAPI.saveSchedule(updatedSchedule);
+      }
+      return updatedSchedule;
+    });
   }, []);
 
   const updateFullScheduleCallback = useCallback((newSchedule: Schedule) => {
     setSchedule(newSchedule);
+    // Salva no electron-store
+    if (window.electronAPI) {
+      window.electronAPI.saveSchedule(newSchedule);
+    }
   }, []);
   
   const clearScheduleCallback = useCallback(() => {

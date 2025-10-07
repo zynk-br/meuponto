@@ -11,6 +11,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   loadSettings: () => ipcRenderer.invoke('load-settings'),
   saveSettings: (settings) => ipcRenderer.send('save-settings', settings),
 
+  // Schedule
+  loadSchedule: () => ipcRenderer.invoke('load-schedule'),
+  saveSchedule: (schedule) => ipcRenderer.send('save-schedule', schedule),
+
   // Credentials (Keytar)
   getCredential: (account) => ipcRenderer.invoke('get-credential', account),
   setCredential: (account, password) => ipcRenderer.send('set-credential', { account, password }),
