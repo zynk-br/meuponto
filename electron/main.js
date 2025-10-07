@@ -1347,14 +1347,32 @@ async function performPunch(page, punchDetails) {
   logToRenderer('INFO', `Tentando registrar ponto: ${punchDetails.day} - ${punchDetails.type} às ${punchDetails.time}`);
   updateAutomationStatusInRenderer(`Registrando ${punchDetails.type}...`);
 
+  // 0. Verificação PREVENTIVA: Antes de tentar registrar, verifica se já existe
+  logToRenderer('INFO', 'Verificando se o ponto já foi registrado anteriormente...');
+  const preCheckPoints = await syncInitialPoints(page);
+  if (preCheckPoints.includes(punchDetails.time)) {
+    logToRenderer('AVISO', `Ponto ${punchDetails.type} às ${punchDetails.time} JÁ ESTÁ REGISTRADO. Pulando para evitar duplicata.`);
+    try {
+      await sendTelegramNotification(
+        TELEGRAM_BOT_TOKEN,
+        currentAutomationSettings.telegramChatId,
+        `⚠️ Ponto ${punchDetails.type} às ${punchDetails.time} já estava registrado. Nenhuma ação necessária.`
+      );
+    } catch (err) {
+      logToRenderer('AVISO', `Falha ao enviar notificação Telegram: ${err.message}`);
+    }
+    return 'success'; // Retorna sucesso pois o ponto já existe
+  }
+
   // 1. Clicar no botão para registrar o ponto
   await page.locator('#localizacao-incluir-ponto').click({ timeout: 15000 });
   logToRenderer('DEBUG', 'Clique para registrar o ponto efetuado. Iniciando verificação...');
 
   // 2. Lógica de verificação com retentativas (Polling)
-  const maxVerificationRetries = 5; // Tentar verificar 5 vezes
+  const maxVerificationRetries = 10; // AUMENTADO: Tentar verificar 10 vezes (50 segundos total)
   const verificationInterval = 5000; // Esperar 5 segundos entre cada tentativa
   let punchVerified = false;
+  let previousPointsCount = preCheckPoints.length;
 
   for (let i = 1; i <= maxVerificationRetries; i++) {
     logToRenderer('DEBUG', `Tentativa de verificação ${i}/${maxVerificationRetries}...`);
@@ -1362,10 +1380,31 @@ async function performPunch(page, punchDetails) {
     // Sincroniza a lista de pontos da página.
     const updatedPoints = await syncInitialPoints(page);
 
-    // Checa se a batida esperada está na lista atualizada.
+    // MÉTODO 1: Checa se a batida esperada está na lista atualizada.
     if (updatedPoints.includes(punchDetails.time)) {
       punchVerified = true;
+      logToRenderer('DEBUG', 'Ponto verificado: encontrado na lista por horário exato.');
       break; // Sucesso! Sai do loop de verificação.
+    }
+
+    // MÉTODO 2: Checa se a QUANTIDADE de pontos aumentou (fallback para sites lentos)
+    // Isso ajuda quando o site salva mas não atualiza a lista imediatamente
+    if (updatedPoints.length > previousPointsCount) {
+      logToRenderer('DEBUG', `Aumento na quantidade de pontos detectado: ${previousPointsCount} → ${updatedPoints.length}`);
+
+      // Verifica se algum dos novos pontos está próximo do horário esperado (tolerância de ±2 minutos)
+      const [expectedHour, expectedMinute] = punchDetails.time.split(':').map(Number);
+      const hasNearbyPunch = updatedPoints.some(timeStr => {
+        const [h, m] = timeStr.split(':').map(Number);
+        const timeDiffMinutes = Math.abs((h * 60 + m) - (expectedHour * 60 + expectedMinute));
+        return timeDiffMinutes <= 2; // Tolerância de 2 minutos
+      });
+
+      if (hasNearbyPunch) {
+        punchVerified = true;
+        logToRenderer('DEBUG', 'Ponto verificado: novo registro próximo do horário esperado detectado.');
+        break;
+      }
     }
 
     // Se não encontrou e não é a última tentativa, espera antes de tentar de novo.
@@ -1381,7 +1420,7 @@ async function performPunch(page, punchDetails) {
       await sendTelegramNotification(
         TELEGRAM_BOT_TOKEN,
         currentAutomationSettings.telegramChatId,
-        `Ponto ${punchDetails.type} às ${punchDetails.time} registrado com sucesso! 🟢`
+        `✅ Ponto ${punchDetails.type} às ${punchDetails.time} registrado com sucesso!`
       );
     } catch (err) {
       logToRenderer('AVISO', `Falha ao enviar notificação Telegram: ${err.message}`);
@@ -1403,7 +1442,7 @@ async function performPunch(page, punchDetails) {
       await sendTelegramNotification(
         TELEGRAM_BOT_TOKEN,
         currentAutomationSettings.telegramChatId,
-        `Falha ao registrar ponto ${punchDetails.type} às ${punchDetails.time} 🔴 Verifique e faça o registro manualmente!`
+        `🔴 Falha ao registrar ponto ${punchDetails.type} às ${punchDetails.time}. Verifique e faça o registro manualmente se necessário!`
       );
     } catch (err) {
       logToRenderer('AVISO', `Falha ao enviar notificação Telegram: ${err.message}`);
