@@ -113,9 +113,14 @@ function simplifyLogMessage(level, message) {
   // Simplificações para mensagens INFO com caminhos/localizações
   if (level === 'INFO') {
     if (message.includes('Pontos encontrados para HOJE')) {
-      const matches = message.match(/: (\d+)/);
-      const count = matches ? matches[1] : '0';
-      return count === '0' ? 'Nenhum ponto registrado hoje.' : `${count} ponto(s) registrado(s) hoje.`;
+      // Extrai os horários após o último ": "
+      const afterColon = message.split('): ')[1];
+      if (!afterColon || afterColon === 'Nenhum') {
+        return 'Nenhum ponto registrado hoje.';
+      }
+      // Conta quantos horários existem (separados por vírgula)
+      const count = afterColon.split(',').length;
+      return `${count} ponto(s) registrado(s) hoje.`;
     }
   }
   
