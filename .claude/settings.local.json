@@ -3,7 +3,8 @@
     "allow": [
       "Bash(cd:*)",
       "Read(./**)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(npm install:*)"
     ],
     "deny": [],
     "ask": []

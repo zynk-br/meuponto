@@ -1050,6 +1050,51 @@ async function sendTelegramNotification(token, chatId, message) {
   });
 }
 
+// --- Telegram Photo Notification ---
+async function sendTelegramPhoto(token, chatId, photoPath, caption) {
+  if (!chatId) {
+    logToRenderer('AVISO', 'Chat ID do Telegram não foi fornecido. Pulando envio de foto.');
+    return;
+  }
+
+  const FormData = require('form-data');
+  const form = new FormData();
+
+  form.append('chat_id', chatId);
+  form.append('photo', fs.createReadStream(photoPath));
+  if (caption) {
+    form.append('caption', caption);
+  }
+
+  const url = `https://api.telegram.org/bot${token}/sendPhoto`;
+
+  return new Promise((resolve, reject) => {
+    const req = https.request(url, {
+      method: 'POST',
+      headers: form.getHeaders()
+    }, (res) => {
+      let responseBody = '';
+      res.on('data', (chunk) => { responseBody += chunk; });
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          logToRenderer('SUCESSO', 'Screenshot enviado para o Telegram com sucesso.');
+          resolve(JSON.parse(responseBody));
+        } else {
+          logToRenderer('ERRO', `Telegram sendPhoto error: ${res.statusCode} - ${responseBody}`);
+          reject(new Error(`Telegram sendPhoto error: ${res.statusCode}`));
+        }
+      });
+    });
+
+    req.on('error', (error) => {
+      logToRenderer('ERRO', `Falha ao enviar foto no Telegram: ${error.message}`);
+      reject(error);
+    });
+
+    form.pipe(req);
+  });
+}
+
 // --- Playwright Automation Logic ---
 let automationSchedule = {};
 let userCredentials = {};
@@ -1439,20 +1484,33 @@ async function performPunch(page, punchDetails) {
     // Se após todas as tentativas o ponto não foi encontrado, aí sim é uma falha.
     logToRenderer('ERRO', `Falha na verificação do ponto ${punchDetails.type} (${punchDetails.time}). O ponto não apareceu na lista após várias tentativas.`);
 
+    let screenshotFullPath = null;
     try {
-      const screenshotPath = `error_verification_failed_${Date.now()}.png`;
-      await page.screenshot({ path: path.join(app.getPath('userData'), screenshotPath) });
-      logToRenderer('DEBUG', `Screenshot da falha de verificação salvo em: ${screenshotPath}`);
+      const screenshotFilename = `error_verification_failed_${Date.now()}.png`;
+      screenshotFullPath = path.join(app.getPath('userData'), screenshotFilename);
+      await page.screenshot({ path: screenshotFullPath });
+      logToRenderer('DEBUG', `Screenshot da falha de verificação salvo em: ${screenshotFilename}`);
     } catch (ssError) {
       logToRenderer('ERRO', `Falha ao tirar screenshot: ${ssError.message}`);
     }
 
     try {
+      // Primeiro envia a mensagem de texto
       await sendTelegramNotification(
         TELEGRAM_BOT_TOKEN,
         currentAutomationSettings.telegramChatId,
         `🔴 Falha ao registrar ponto ${punchDetails.type} às ${punchDetails.time}. Verifique e faça o registro manualmente se necessário!`
       );
+
+      // Se o screenshot foi tirado com sucesso, envia a foto
+      if (screenshotFullPath && fs.existsSync(screenshotFullPath)) {
+        await sendTelegramPhoto(
+          TELEGRAM_BOT_TOKEN,
+          currentAutomationSettings.telegramChatId,
+          screenshotFullPath,
+          `Screenshot da falha - ${punchDetails.type} às ${punchDetails.time}`
+        );
+      }
     } catch (err) {
       logToRenderer('AVISO', `Falha ao enviar notificação Telegram: ${err.message}`);
     }
