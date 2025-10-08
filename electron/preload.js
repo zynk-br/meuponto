@@ -44,6 +44,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   startAutomation: (data) => ipcRenderer.send('start-automation', data), // data: { schedule, credentials, settings }
   stopAutomation: () => ipcRenderer.send('stop-automation'),
 
+  // Calendar Export
+  exportCalendar: (schedule) => ipcRenderer.invoke('export-calendar', schedule),
+
   // Listeners for Main Process Events
   onLogFromMain: (callback) => {
     const handler = (_event, logEntry) => callback(logEntry);

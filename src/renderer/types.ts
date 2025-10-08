@@ -114,6 +114,8 @@ export interface ElectronAPI {
   startAutomation: (data: { schedule: Schedule, credentials: UserCredentials, settings: Settings }) => void;
   stopAutomation: () => void;
 
+  exportCalendar: (schedule: Schedule) => Promise<{ success: boolean, path?: string, error?: string }>;
+
   onLogFromMain: (callback: (logEntry: {level: LogLevel, message: string}) => void) => () => void;
   onAutomationStatusUpdate: (callback: (statusUpdate: AutomationState) => void) => () => void;
 

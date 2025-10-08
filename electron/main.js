@@ -1,5 +1,5 @@
 // Arquivo agora em: electron/main.js
-const { app, BrowserWindow, ipcMain, dialog, Notification, powerSaveBlocker } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Notification, powerSaveBlocker, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const Store = require('electron-store');
@@ -1094,6 +1094,129 @@ async function sendTelegramPhoto(token, chatId, photoPath, caption) {
     form.pipe(req);
   });
 }
+
+// --- Calendar Integration (.ics generation) ---
+async function generateCalendarFile(schedule) {
+  try {
+    const ICalGenerator = require('ical-generator').default || require('ical-generator');
+    const calendar = ICalGenerator({ name: 'Registro de Ponto' });
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Normaliza para meia-noite
+
+    const daysOfWeek = {
+      'Segunda-feira': 1,
+      'Terça-feira': 2,
+      'Quarta-feira': 3,
+      'Quinta-feira': 4,
+      'Sexta-feira': 5
+    };
+
+    // Calcula o início e fim da semana atual (segunda a sexta)
+    const currentDayOfWeek = today.getDay(); // 0 = Domingo, 1 = Segunda, ..., 6 = Sábado
+
+    // Calcula quantos dias faltam até a próxima segunda-feira (ou se já é segunda, usa hoje)
+    let daysUntilMonday = (1 - currentDayOfWeek + 7) % 7;
+    if (currentDayOfWeek === 0) daysUntilMonday = 1; // Se domingo, próxima segunda é amanhã
+    if (currentDayOfWeek >= 1 && currentDayOfWeek <= 5) {
+      // Se estivermos entre segunda e sexta, volta para a segunda da semana atual
+      daysUntilMonday = 1 - currentDayOfWeek;
+    }
+
+    const weekStart = new Date(today);
+    weekStart.setDate(today.getDate() + daysUntilMonday);
+
+    // Apenas a semana atual (segunda a sexta)
+    Object.entries(schedule).forEach(([dayName, entry]) => {
+      // IMPORTANTE: Pula se for feriado
+      if (entry.feriado) {
+        logToRenderer('DEBUG', `Pulando ${dayName} (marcado como feriado) na geração do calendário.`);
+        return;
+      }
+
+      const targetDay = daysOfWeek[dayName];
+      if (!targetDay) return;
+
+      // Calcula a data do dia da semana atual
+      const daysFromMonday = targetDay - 1; // Segunda = 0, Terça = 1, etc.
+      const eventDate = new Date(weekStart);
+      eventDate.setDate(weekStart.getDate() + daysFromMonday);
+
+      // Verifica se o dia já passou (não cria eventos para dias passados)
+      if (eventDate < today) {
+        logToRenderer('DEBUG', `Pulando ${dayName} (${eventDate.toLocaleDateString('pt-BR')}) - dia já passou.`);
+        return;
+      }
+
+      // Cria eventos para cada horário de ponto
+      const punchTimes = [
+        { time: entry.entrada1, name: 'Entrada 1' },
+        { time: entry.saida1, name: 'Saída 1' },
+        { time: entry.entrada2, name: 'Entrada 2' },
+        { time: entry.saida2, name: 'Saída 2' }
+      ];
+
+      punchTimes.forEach(punch => {
+        if (!punch.time) return;
+
+        const [hours, minutes] = punch.time.split(':').map(Number);
+        const eventStart = new Date(eventDate);
+        eventStart.setHours(hours, minutes, 0, 0);
+
+        const eventEnd = new Date(eventStart);
+        eventEnd.setMinutes(eventEnd.getMinutes() + 5); // Evento de 5 minutos
+
+        calendar.createEvent({
+          start: eventStart,
+          end: eventEnd,
+          summary: `🕐 ${punch.name} - Registro de Ponto`,
+          description: `Lembrete para registrar ponto: ${punch.name} às ${punch.time}`,
+          location: 'Central do Funcionário',
+          alarms: [
+            { type: 'display', trigger: 300 }, // 5 minutos antes
+            { type: 'display', trigger: 60 }   // 1 minuto antes
+          ]
+        });
+      });
+    });
+
+    const icsPath = path.join(app.getPath('userData'), 'registro-ponto.ics');
+    fs.writeFileSync(icsPath, calendar.toString());
+
+    logToRenderer('SUCESSO', `Arquivo de calendário gerado: ${icsPath}`);
+    return icsPath;
+  } catch (error) {
+    logToRenderer('ERRO', `Erro ao gerar arquivo de calendário: ${error.message}`);
+    throw error;
+  }
+}
+
+// Handler para exportar calendário
+ipcMain.handle('export-calendar', async (event, schedule) => {
+  try {
+    const icsPath = await generateCalendarFile(schedule);
+
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Calendário Exportado',
+      message: 'Arquivo de calendário criado com sucesso!',
+      detail: `O arquivo foi salvo em:\n${icsPath}\n\nDeseja abrir o arquivo para importar no seu calendário?`,
+      buttons: ['Abrir Arquivo', 'Abrir Pasta', 'Fechar'],
+      defaultId: 0
+    });
+
+    if (result.response === 0) {
+      // Abrir arquivo .ics (vai abrir no app de calendário padrão)
+      shell.openPath(icsPath);
+    } else if (result.response === 1) {
+      // Abrir pasta onde o arquivo está
+      shell.showItemInFolder(icsPath);
+    }
+
+    return { success: true, path: icsPath };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
 
 // --- Playwright Automation Logic ---
 let automationSchedule = {};

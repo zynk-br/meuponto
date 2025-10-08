@@ -206,6 +206,24 @@ const AppView: React.FC = () => {
     }
   };
 
+  const handleExportCalendar = async () => {
+    addLog(LogLevel.INFO, "Exportando horários para calendário...");
+    if (window.electronAPI) {
+      try {
+        const result = await window.electronAPI.exportCalendar(schedule);
+        if (result.success) {
+          addLog(LogLevel.SUCCESS, `Calendário exportado com sucesso: ${result.path}`);
+        } else {
+          addLog(LogLevel.ERROR, `Falha ao exportar calendário: ${result.error}`);
+        }
+      } catch (error) {
+        addLog(LogLevel.ERROR, `Erro ao exportar calendário: ${error}`);
+      }
+    } else {
+      addLog(LogLevel.ERROR, "Electron API não disponível para exportar calendário.");
+    }
+  };
+
   return (
     <div className="p-6 space-y-6 bg-secondary-50 bg-gradient-to-br from-primary-500 to-primary-700 dark:from-primary-700 dark:to-primary-900 flex-grow overflow-y-auto">
       <div className="bg-white dark:bg-secondary-800 p-4 rounded-lg shadow">
@@ -245,9 +263,19 @@ const AppView: React.FC = () => {
       </div>
 
       <div className="bg-white dark:bg-secondary-800 p-4 rounded-lg shadow overflow-x-auto">
-        <h2 className="text-xl font-semibold mb-3 text-primary-700 dark:text-primary-300">
-          Grade de Horários ({automationMode})
-        </h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-xl font-semibold text-primary-700 dark:text-primary-300">
+            Grade de Horários ({automationMode})
+          </h2>
+          <button
+            onClick={handleExportCalendar}
+            disabled={automationState.isRunning}
+            title="Exportar horários para o calendário (Google Calendar, Apple Calendar, etc.)"
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 flex items-center"
+          >
+            <i className="fas fa-calendar-plus mr-2"></i> Exportar Calendário
+          </button>
+        </div>
         <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-secondary-200 dark:divide-secondary-700">
             <thead className="bg-secondary-100 dark:bg-secondary-700">
@@ -282,7 +310,7 @@ const AppView: React.FC = () => {
                 <span className="ml-2">| Tarefa: {automationState.currentTask}</span>
             )}
         </div>
-        <div className="flex space-x-3">
+        <div className="flex flex-wrap gap-3">
           <button
             onClick={handleExecute}
             disabled={automationState.isRunning || settings.automationBrowserStatus !== BrowserStatus.OK}
