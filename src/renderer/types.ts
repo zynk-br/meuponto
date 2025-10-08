@@ -61,6 +61,12 @@ export interface TimeEntry {
 
 export type Schedule = Record<DayOfWeek, TimeEntry>;
 
+export interface MonthlyDayEntry extends TimeEntry {
+  date: string; // formato: "YYYY-MM-DD"
+}
+
+export type MonthlySchedule = Record<string, MonthlyDayEntry>; // key: "YYYY-MM-DD"
+
 export enum DayOfWeek {
   MONDAY = "Segunda-feira",
   TUESDAY = "Terça-feira",
@@ -70,8 +76,9 @@ export enum DayOfWeek {
 }
 
 export enum AutomationMode {
-  MANUAL = "Manual",
-  SEMI_AUTOMATIC = "Semi-automático",
+  WEEKLY_MANUAL = "Semanal Manual",
+  WEEKLY_AUTO = "Semanal Automático",
+  MONTHLY_AUTO = "Mensal Automático",
 }
 
 export interface AutomationState {

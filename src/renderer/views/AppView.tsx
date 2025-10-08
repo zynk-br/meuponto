@@ -1,8 +1,9 @@
 // Arquivo agora em: src/renderer/views/AppView.tsx
 import React, { useState, useCallback, useEffect } from 'react';
 import { useAppContext } from '../hooks/useAppContext'; // Ajustado
-import { DayOfWeek, LogLevel, TimeEntry, Schedule, AutomationMode, BrowserStatus } from '../types'; // Ajustado
+import { DayOfWeek, LogLevel, TimeEntry, Schedule, AutomationMode, BrowserStatus, MonthlySchedule, MonthlyDayEntry } from '../types'; // Ajustado
 import { DAYS_OF_WEEK } from '../constants'; // Ajustado
+import MonthlyCalendar from '../components/MonthlyCalendar';
 
 const DayRowEditor: React.FC<{ day: DayOfWeek, entry: TimeEntry, onChange: (newEntry: TimeEntry) => void, readonly: boolean }> = ({ day, entry, onChange, readonly }) => {
 
@@ -70,31 +71,133 @@ const DayRowEditor: React.FC<{ day: DayOfWeek, entry: TimeEntry, onChange: (newE
 
 
 const AppView: React.FC = () => {
-  const { 
-    addLog, 
-    schedule, 
-    updateScheduleEntry, 
+  const {
+    addLog,
+    schedule,
+    updateScheduleEntry,
     updateFullSchedule,
     clearSchedule,
-    automationMode, 
+    automationMode,
     setAutomationMode,
     automationState,
     settings,
     currentUserCredentials
   } = useAppContext();
-  
-  const [initialHourSemiAuto, setInitialHourSemiAuto] = useState<string>("07:00");
+
+  // Estados separados para cada modo (não se influenciam)
+  const [weeklyManualSchedule, setWeeklyManualSchedule] = useState<Schedule>({
+    [DayOfWeek.MONDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
+    [DayOfWeek.TUESDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
+    [DayOfWeek.WEDNESDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
+    [DayOfWeek.THURSDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
+    [DayOfWeek.FRIDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
+  });
+  const [weeklyAutoSchedule, setWeeklyAutoSchedule] = useState<Schedule>({
+    [DayOfWeek.MONDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
+    [DayOfWeek.TUESDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
+    [DayOfWeek.WEDNESDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
+    [DayOfWeek.THURSDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
+    [DayOfWeek.FRIDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
+  });
+  const [monthlyAutoSchedule, setMonthlyAutoSchedule] = useState<MonthlySchedule>({});
+
+  const [initialHourWeeklyAuto, setInitialHourWeeklyAuto] = useState<string>("07:00");
+  const [initialHourMonthlyAuto, setInitialHourMonthlyAuto] = useState<string>("07:00");
 
   const handleModeChange = (mode: AutomationMode) => {
     setAutomationMode(mode);
     addLog(LogLevel.INFO, `Modo de operação alterado para: ${mode}`);
-    if (mode === AutomationMode.SEMI_AUTOMATIC) {      
-      generateSemiAutomaticSchedule(initialHourSemiAuto);
+    if (mode === AutomationMode.WEEKLY_AUTO) {
+      generateWeeklyAutoSchedule(initialHourWeeklyAuto);
+    } else if (mode === AutomationMode.MONTHLY_AUTO) {
+      generateMonthlyAutoSchedule(initialHourMonthlyAuto);
     }
   };
+
+  const handleUpdateMonthlyDay = useCallback((date: string, entry: MonthlyDayEntry) => {
+    setMonthlyAutoSchedule(prev => ({
+      ...prev,
+      [date]: entry
+    }));
+  }, []);
+
+  const generateMonthlyAutoSchedule = useCallback((baseStartTime: string) => {
+    addLog(LogLevel.INFO, 'Gerando calendário mensal automático com horários variados...');
+    const newMonthlySchedule: MonthlySchedule = {};
+    const today = new Date();
+    const currentMonth = today.getMonth();
+    const currentYear = today.getFullYear();
+    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+
+    const baseStart = parseTime(baseStartTime);
+    if (!baseStart) {
+      addLog(LogLevel.ERROR, `Hora inicial inválida: ${baseStartTime}`);
+      return;
+    }
+
+    // Armazena horários já usados para garantir que não se repitam
+    const usedTimes = new Set<string>();
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const date = new Date(currentYear, currentMonth, day);
+      const dayOfWeek = date.getDay(); // 0 = Domingo, 1 = Segunda, etc.
+      const dateKey = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+      // Pula finais de semana
+      if (dayOfWeek === 0 || dayOfWeek === 6) {
+        continue;
+      }
+
+      // Gera horários únicos para este dia
+      const entrada1Min = generateUniqueRandomMinute(usedTimes);
+      const entrada1 = formatTime(baseStart.hours, entrada1Min);
+      usedTimes.add(entrada1);
+
+      const saida1Hour = 12;
+      const saida1Min = generateUniqueRandomMinute(usedTimes);
+      const saida1 = formatTime(saida1Hour, saida1Min);
+      usedTimes.add(saida1);
+
+      const entrada2 = addHours(saida1, 1);
+      usedTimes.add(entrada2);
+
+      const saida2 = addHours(entrada1, 9); // Total 8h trabalho + 1h almoço
+      usedTimes.add(saida2);
+
+      newMonthlySchedule[dateKey] = {
+        date: dateKey,
+        entrada1,
+        saida1,
+        entrada2,
+        saida2,
+        feriado: false
+      };
+    }
+
+    setMonthlyAutoSchedule(newMonthlySchedule);
+    addLog(LogLevel.SUCCESS, `Calendário mensal gerado com ${Object.keys(newMonthlySchedule).length} dias únicos.`);
+  }, [addLog]);
   
   const generateRandomMinute = (min: number = 0, max: number = 59) => {
     return Math.floor(Math.random() * (max - min + 1)) + min;
+  };
+
+  const generateUniqueRandomMinute = (usedTimes: Set<string>, baseHour?: number) => {
+    let attempts = 0;
+    const maxAttempts = 60;
+
+    while (attempts < maxAttempts) {
+      const minute = generateRandomMinute();
+      const timeStr = baseHour !== undefined ? formatTime(baseHour, minute) : minute.toString();
+
+      if (!usedTimes.has(timeStr)) {
+        return minute;
+      }
+      attempts++;
+    }
+
+    // Fallback: retorna qualquer minuto se não conseguir único após 60 tentativas
+    return generateRandomMinute();
   };
 
   const formatTime = (hours: number, minutes: number) => {
@@ -118,19 +221,19 @@ const AppView: React.FC = () => {
     return formatTime(newHours, newMinutes);
   };
 
-  const generateSemiAutomaticSchedule = useCallback((baseStartTime: string) => {
+  const generateWeeklyAutoSchedule = useCallback((baseStartTime: string) => {
     const baseStart = parseTime(baseStartTime);
     if (!baseStart) {
-      addLog(LogLevel.ERROR, `Hora inicial inválida para modo semi-automático: ${baseStartTime}`);
+      addLog(LogLevel.ERROR, `Hora inicial inválida para modo semanal automático: ${baseStartTime}`);
       return;
     }
 
-    addLog(LogLevel.INFO, `Gerando horários semi-automáticos com base em ${baseStartTime}...`);
-    const newSchedule: Schedule = { ...schedule }; 
+    addLog(LogLevel.INFO, `Gerando horários semanais automáticos com base em ${baseStartTime}...`);
+    const newSchedule: Schedule = { ...weeklyAutoSchedule }; 
 
     DAYS_OF_WEEK.forEach(day => {
-      if (newSchedule[day].feriado) { 
-        addLog(LogLevel.DEBUG, `Pulando ${day} (feriado) na geração semi-automática.`);
+      if (newSchedule[day].feriado) {
+        addLog(LogLevel.DEBUG, `Pulando ${day} (feriado) na geração semanal automática.`);
         return;
       }
 
@@ -140,30 +243,35 @@ const AppView: React.FC = () => {
       const saida1Hour = 12;
       const saida1Min = generateRandomMinute();
       const saida1 = formatTime(saida1Hour, saida1Min);
-      
-      const entrada2 = addHours(saida1, 1); 
-      const saida2 = addHours(entrada1, 9); // Total 8h work + 1h lunch
 
+      const entrada2 = addHours(saida1, 1);
+      const saida2 = addHours(entrada1, 9); // Total 8h trabalho + 1h almoço
 
       newSchedule[day] = {
-        ...newSchedule[day], 
+        ...newSchedule[day],
         entrada1,
         saida1,
         entrada2,
         saida2,
       };
     });
-    updateFullSchedule(newSchedule);
-    addLog(LogLevel.SUCCESS, "Grade de horários semi-automática gerada.");
-  }, [addLog, updateFullSchedule, schedule]); // schedule dependency can be tricky here, might re-evaluate
-
+    setWeeklyAutoSchedule(newSchedule);
+    addLog(LogLevel.SUCCESS, "Grade de horários semanais automáticos gerada.");
+  }, [addLog, weeklyAutoSchedule]);
 
   useEffect(() => {
-    if (automationMode === AutomationMode.SEMI_AUTOMATIC) {
-      generateSemiAutomaticSchedule(initialHourSemiAuto);
+    if (automationMode === AutomationMode.WEEKLY_AUTO) {
+      generateWeeklyAutoSchedule(initialHourWeeklyAuto);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialHourSemiAuto, automationMode]); // generateSemiAutomaticSchedule removed from deps to avoid loop if it uses schedule directly
+  }, [initialHourWeeklyAuto, automationMode]);
+
+  useEffect(() => {
+    if (automationMode === AutomationMode.MONTHLY_AUTO) {
+      generateMonthlyAutoSchedule(initialHourMonthlyAuto);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialHourMonthlyAuto, automationMode]);
 
 
   const handleExecute = () => {
@@ -239,25 +347,43 @@ const AppView: React.FC = () => {
                   ? 'bg-primary-600 text-white shadow-md' 
                   : 'bg-secondary-200 hover:bg-secondary-300 dark:bg-secondary-700 dark:hover:bg-secondary-600 text-secondary-800 dark:text-secondary-200'}`}
             >
-              {mode === AutomationMode.MANUAL ? <i className="fas fa-edit mr-2"></i> : <i className="fas fa-magic mr-2"></i>}
+              {mode === AutomationMode.WEEKLY_MANUAL && <i className="fas fa-edit mr-2"></i>}
+              {mode === AutomationMode.WEEKLY_AUTO && <i className="fas fa-magic mr-2"></i>}
+              {mode === AutomationMode.MONTHLY_AUTO && <i className="fas fa-calendar-alt mr-2"></i>}
               {mode}
             </button>
           ))}
         </div>
-         {automationMode === AutomationMode.SEMI_AUTOMATIC && (
+         {automationMode === AutomationMode.WEEKLY_AUTO && (
           <div className="mt-4">
-            <label htmlFor="initialHourSemiAuto" className="block text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-1">
+            <label htmlFor="initialHourWeeklyAuto" className="block text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-1">
               Hora base para Entrada 1 (HH:MM):
             </label>
             <input
               type="time"
-              id="initialHourSemiAuto"
-              value={initialHourSemiAuto}
+              id="initialHourWeeklyAuto"
+              value={initialHourWeeklyAuto}
               disabled={automationState.isRunning}
-              onChange={(e) => setInitialHourSemiAuto(e.target.value)}
+              onChange={(e) => setInitialHourWeeklyAuto(e.target.value)}
               className="p-2 border rounded-md text-sm bg-white dark:bg-secondary-700 text-secondary-700 dark:text-secondary-200 border-secondary-300 dark:border-secondary-600 focus:ring-primary-500 focus:border-primary-500 disabled:opacity-60"
             />
              <p className="text-xs text-secondary-500 dark:text-secondary-400 mt-1">A Entrada 1 será aleatória dentro desta hora. Outros horários serão baseados nela.</p>
+          </div>
+        )}
+         {automationMode === AutomationMode.MONTHLY_AUTO && (
+          <div className="mt-4">
+            <label htmlFor="initialHourMonthlyAuto" className="block text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-1">
+              Hora base para Entrada 1 (HH:MM):
+            </label>
+            <input
+              type="time"
+              id="initialHourMonthlyAuto"
+              value={initialHourMonthlyAuto}
+              disabled={automationState.isRunning}
+              onChange={(e) => setInitialHourMonthlyAuto(e.target.value)}
+              className="p-2 border rounded-md text-sm bg-white dark:bg-secondary-700 text-secondary-700 dark:text-secondary-200 border-secondary-300 dark:border-secondary-600 focus:ring-primary-500 focus:border-primary-500 disabled:opacity-60"
+            />
+             <p className="text-xs text-secondary-500 dark:text-secondary-400 mt-1">Todos os horários do mês serão gerados automaticamente sem repetições, baseados nesta hora.</p>
           </div>
         )}
       </div>
@@ -265,7 +391,7 @@ const AppView: React.FC = () => {
       <div className="bg-white dark:bg-secondary-800 p-4 rounded-lg shadow overflow-x-auto">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-xl font-semibold text-primary-700 dark:text-primary-300">
-            Grade de Horários ({automationMode})
+            {automationMode === AutomationMode.MONTHLY_AUTO ? 'Calendário Mensal' : 'Grade de Horários'} ({automationMode})
           </h2>
           <button
             onClick={handleExportCalendar}
@@ -276,7 +402,15 @@ const AppView: React.FC = () => {
             <i className="fas fa-calendar-plus mr-2"></i> Exportar Calendário
           </button>
         </div>
-        <div className="overflow-x-auto">
+
+        {automationMode === AutomationMode.MONTHLY_AUTO ? (
+          <MonthlyCalendar
+            monthlySchedule={monthlyAutoSchedule}
+            onUpdateDay={handleUpdateMonthlyDay}
+            readonly={automationState.isRunning}
+          />
+        ) : (
+          <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-secondary-200 dark:divide-secondary-700">
             <thead className="bg-secondary-100 dark:bg-secondary-700">
                 <tr>
@@ -293,14 +427,21 @@ const AppView: React.FC = () => {
                 <DayRowEditor
                     key={day}
                     day={day}
-                    entry={schedule[day]}
-                    onChange={(newEntry) => updateScheduleEntry(day, newEntry)}
-                    readonly={automationState.isRunning}
+                    entry={automationMode === AutomationMode.WEEKLY_MANUAL ? weeklyManualSchedule[day] : weeklyAutoSchedule[day]}
+                    onChange={(newEntry) => {
+                      if (automationMode === AutomationMode.WEEKLY_MANUAL) {
+                        setWeeklyManualSchedule(prev => ({ ...prev, [day]: newEntry }));
+                      } else {
+                        setWeeklyAutoSchedule(prev => ({ ...prev, [day]: newEntry }));
+                      }
+                    }}
+                    readonly={automationState.isRunning || automationMode === AutomationMode.WEEKLY_AUTO}
                 />
                 ))}
             </tbody>
             </table>
-        </div>
+          </div>
+        )}
       </div>
 
       <div className="bg-white dark:bg-secondary-800 p-4 rounded-lg shadow flex flex-col sm:flex-row items-center justify-between space-y-3 sm:space-y-0 sm:space-x-3">

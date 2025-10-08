@@ -41,7 +41,7 @@ export const LOG_LEVEL_COLORS: Record<LogLevel, string> = {
   [LogLevel.DEBUG]: "text-gray-500 dark:text-gray-400",
 };
 
-export const INITIAL_AUTOMATION_MODE = AutomationMode.MANUAL;
+export const INITIAL_AUTOMATION_MODE = AutomationMode.WEEKLY_MANUAL;
 
 export const NODE_DOWNLOAD_URL = "https://nodejs.org/";
 export const HOMEBREW_INSTALL_COMMAND = "/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"";
