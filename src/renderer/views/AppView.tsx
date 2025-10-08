@@ -273,6 +273,53 @@ const AppView: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialHourMonthlyAuto, automationMode]);
 
+  // Converte o schedule mensal para o formato semanal esperado pela automação
+  const convertMonthlyToWeeklySchedule = (monthlySchedule: MonthlySchedule): Schedule => {
+    const today = new Date();
+    const dateKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const todayEntry = monthlySchedule[dateKey];
+
+    // Se não houver entrada para hoje, retorna schedule vazio
+    if (!todayEntry) {
+      return DAYS_OF_WEEK.reduce((acc, day) => {
+        acc[day] = { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false };
+        return acc;
+      }, {} as Schedule);
+    }
+
+    // Determina o dia da semana atual (0 = Domingo, 1 = Segunda, ..., 6 = Sábado)
+    const dayOfWeek = today.getDay();
+
+    // Mapeia índice do dia da semana para DayOfWeek enum (apenas dias úteis)
+    const dayMap: { [key: number]: DayOfWeek } = {
+      1: DayOfWeek.MONDAY,
+      2: DayOfWeek.TUESDAY,
+      3: DayOfWeek.WEDNESDAY,
+      4: DayOfWeek.THURSDAY,
+      5: DayOfWeek.FRIDAY
+    };
+
+    const currentDayName = dayMap[dayOfWeek];
+
+    // Cria schedule com os horários de hoje apenas no dia correto
+    const weeklySchedule = DAYS_OF_WEEK.reduce((acc, day) => {
+      acc[day] = { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false };
+      return acc;
+    }, {} as Schedule);
+
+    // Aplica os horários de hoje no dia da semana correspondente (se for dia útil)
+    if (currentDayName && weeklySchedule[currentDayName] !== undefined) {
+      weeklySchedule[currentDayName] = {
+        entrada1: todayEntry.entrada1,
+        saida1: todayEntry.saida1,
+        entrada2: todayEntry.entrada2,
+        saida2: todayEntry.saida2,
+        feriado: todayEntry.feriado
+      };
+    }
+
+    return weeklySchedule;
+  };
 
   const handleExecute = () => {
     if (!currentUserCredentials || !currentUserCredentials.folha || !currentUserCredentials.senha) {
@@ -286,10 +333,21 @@ const AppView: React.FC = () => {
         return;
     }
 
+    // Determina qual schedule usar baseado no modo ativo
+    let scheduleToUse: Schedule;
+    if (automationMode === AutomationMode.WEEKLY_MANUAL) {
+      scheduleToUse = weeklyManualSchedule;
+    } else if (automationMode === AutomationMode.WEEKLY_AUTO) {
+      scheduleToUse = weeklyAutoSchedule;
+    } else {
+      // Para MONTHLY_AUTO, converte para formato semanal (usa horários do dia atual do mês)
+      scheduleToUse = convertMonthlyToWeeklySchedule(monthlyAutoSchedule);
+    }
+
     addLog(LogLevel.INFO, `Solicitando início da automação no modo: ${automationMode}`);
     if (window.electronAPI) {
         window.electronAPI.startAutomation({
-            schedule,
+            schedule: scheduleToUse,
             credentials: currentUserCredentials,
             settings
         });

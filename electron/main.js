@@ -1480,7 +1480,185 @@ async function syncInitialPoints(page) {
   }
 }
 
-function rescheduleWithDelay(currentSchedule, failedPunchType, delayMinutes = 10) {
+/**
+ * Extrai os parâmetros de duração do schedule (LUNCH_MIN e WORK_HOURS)
+ * @param {Object} scheduleEntry - Entrada do schedule com entrada1, saida1, entrada2, saida2
+ * @returns {Object} - { lunchMinutes, workMinutes }
+ */
+function extractScheduleParameters(scheduleEntry) {
+  if (!scheduleEntry || !scheduleEntry.entrada1 || !scheduleEntry.saida1 || !scheduleEntry.entrada2 || !scheduleEntry.saida2) {
+    // Valores padrão: 1h de almoço, 8h de trabalho
+    return { lunchMinutes: 60, workMinutes: 480 };
+  }
+
+  // Parse dos horários
+  const parseTime = (timeStr) => {
+    const [h, m] = timeStr.split(':').map(Number);
+    return h * 60 + m; // retorna total em minutos
+  };
+
+  const e1 = parseTime(scheduleEntry.entrada1);
+  const s1 = parseTime(scheduleEntry.saida1);
+  const e2 = parseTime(scheduleEntry.entrada2);
+  const s2 = parseTime(scheduleEntry.saida2);
+
+  // LUNCH_MIN = entrada2 - saida1
+  const lunchMinutes = e2 - s1;
+
+  // WORK_HOURS = (saida2 - entrada1) - LUNCH_MIN
+  const totalMinutes = s2 - e1;
+  const workMinutes = totalMinutes - lunchMinutes;
+
+  return { lunchMinutes, workMinutes };
+}
+
+/**
+ * Converte minutos para string HH:MM
+ * @param {number} totalMinutes - Total de minutos
+ * @returns {string} - Horário no formato HH:MM
+ */
+function minutesToTimeString(totalMinutes) {
+  const hours = Math.floor(totalMinutes / 60) % 24;
+  const minutes = totalMinutes % 60;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+}
+
+/**
+ * Calcula os targets (horários alvo) do dia ancorados nos pontos já registrados
+ * REGRA DE ATIVAÇÃO:
+ *   - Se houver pelo menos 1 ponto registrado: aplica ancoragem
+ *   - Se não houver pontos (lista vazia): retorna schedule original SEM modificações
+ *   - Se pontos não forem cronologicamente válidos: ignora e usa schedule original
+ *
+ * @param {Object} scheduleEntry - Entrada do schedule original (para extrair durações)
+ * @param {Array<string>} existingPoints - Pontos já registrados hoje (array de strings HH:MM ordenados)
+ * @returns {Object} - { entrada1, saida1, entrada2, saida2, anchored: boolean }
+ */
+function calculateAnchoredTargets(scheduleEntry, existingPoints) {
+  // REGRA DE ATIVAÇÃO: Se NÃO há pontos registrados, retorna schedule original 100%
+  if (!existingPoints || existingPoints.length === 0) {
+    logToRenderer('INFO', 'Nenhum ponto registrado hoje. Usando schedule original sem ancoragem.');
+    return {
+      entrada1: scheduleEntry.entrada1,
+      saida1: scheduleEntry.saida1,
+      entrada2: scheduleEntry.entrada2,
+      saida2: scheduleEntry.saida2,
+      anchored: false // Flag indicando que NÃO foi ancorado
+    };
+  }
+
+  // VALIDAÇÃO CRONOLÓGICA: Verifica se pontos fazem sentido na ordem E1 → S1 → E2 → S2
+  // Se houver "pulos" incompatíveis (ex: apenas E1 e S2 sem S1 e E2), ignora os pontos
+  const parseTime = (timeStr) => {
+    if (!timeStr) return null;
+    const [h, m] = timeStr.split(':').map(Number);
+    return h * 60 + m;
+  };
+
+  // Converte pontos para minutos
+  const pointsInMinutes = existingPoints.map(p => {
+    if (typeof p === 'string') {
+      return parseTime(p);
+    } else if (p && p.time) {
+      return parseTime(p.time);
+    }
+    return null;
+  }).filter(t => t !== null);
+
+  // Verifica se os pontos estão em ordem crescente (validação básica)
+  for (let i = 1; i < pointsInMinutes.length; i++) {
+    if (pointsInMinutes[i] <= pointsInMinutes[i - 1]) {
+      logToRenderer('ERRO', '⚠️ Pontos registrados não estão em ordem cronológica. DIA INVÁLIDO - Não tentará mais registros hoje. Aguardando próximo dia.');
+      return {
+        entrada1: scheduleEntry.entrada1,
+        saida1: scheduleEntry.saida1,
+        entrada2: scheduleEntry.entrada2,
+        saida2: scheduleEntry.saida2,
+        anchored: false,
+        invalid: true // FLAG: Dia inválido, pular completamente
+      };
+    }
+  }
+
+  // Validação de intervalo esperado entre pontos (E1 e S2 devem ter pelo menos a carga de trabalho + almoço)
+  if (pointsInMinutes.length === 2) {
+    const diff = pointsInMinutes[1] - pointsInMinutes[0];
+    const { lunchMinutes, workMinutes } = extractScheduleParameters(scheduleEntry);
+    const minExpected = lunchMinutes + workMinutes - 60; // Margem de 60 minutos
+
+    // Se a diferença for muito grande (> carga esperada + 2h), pode ser E1 e S2 sem S1/E2
+    // Isso é anormal, então ignoramos
+    if (diff > (lunchMinutes + workMinutes + 120)) {
+      logToRenderer('ERRO', `⚠️ Diferença entre os 2 pontos (${diff}min) é incompatível com padrão esperado. Possível gap de S1/E2. DIA INVÁLIDO - Não tentará mais registros hoje. Aguardando próximo dia.`);
+      return {
+        entrada1: scheduleEntry.entrada1,
+        saida1: scheduleEntry.saida1,
+        entrada2: scheduleEntry.entrada2,
+        saida2: scheduleEntry.saida2,
+        anchored: false,
+        invalid: true // FLAG: Dia inválido, pular completamente
+      };
+    }
+  }
+
+  // Pontos válidos → ATIVA ANCORAGEM
+  logToRenderer('INFO', `${existingPoints.length} ponto(s) registrado(s) válido(s). Ativando ancoragem.`);
+
+  // Extrai parâmetros de duração do schedule
+  const { lunchMinutes, workMinutes } = extractScheduleParameters(scheduleEntry);
+
+  // Parse dos horários do schedule (valores padrão/planejados)
+  // Reutiliza a função parseTime já declarada acima
+  const scheduledE1 = parseTime(scheduleEntry.entrada1);
+  const scheduledS1 = parseTime(scheduleEntry.saida1);
+  const scheduledE2 = parseTime(scheduleEntry.entrada2);
+  const scheduledS2 = parseTime(scheduleEntry.saida2);
+
+  // Valores iniciais são do schedule
+  let targetE1 = scheduledE1;
+  let targetS1 = scheduledS1;
+  let targetE2 = scheduledE2;
+  let targetS2 = scheduledS2;
+
+  // Reutiliza pointsInMinutes já calculado acima na validação
+  const existingInMinutes = pointsInMinutes;
+
+  // REGRA DE ANCORAGEM:
+  // 1. Se existe entrada1 registrada → saida2_target = entrada1_reg + WORK_HOURS + LUNCH_MIN
+  if (existingInMinutes.length >= 1) {
+    const entrada1_reg = existingInMinutes[0];
+    targetE1 = entrada1_reg; // Já registrado
+    targetS2 = entrada1_reg + workMinutes + lunchMinutes; // Ancoragem
+  }
+
+  // 2. Se existe saida1 registrada → entrada2_target = saida1_reg + LUNCH_MIN
+  if (existingInMinutes.length >= 2) {
+    const saida1_reg = existingInMinutes[1];
+    targetS1 = saida1_reg; // Já registrado
+    targetE2 = saida1_reg + lunchMinutes; // Ancoragem
+  }
+
+  // 3. Se existe entrada2 registrada, mantém ela
+  if (existingInMinutes.length >= 3) {
+    targetE2 = existingInMinutes[2];
+  }
+
+  // 4. Se existe saida2 registrada, mantém ela
+  if (existingInMinutes.length >= 4) {
+    targetS2 = existingInMinutes[3];
+  }
+
+  // Converte de volta para strings HH:MM
+  return {
+    entrada1: minutesToTimeString(targetE1),
+    saida1: minutesToTimeString(targetS1),
+    entrada2: minutesToTimeString(targetE2),
+    saida2: minutesToTimeString(targetS2),
+    anchored: true // Flag indicando que FOI ancorado
+  };
+}
+
+function rescheduleWithDelay(currentSchedule, failedPunchType, delayMinutes = 10, existingPoints = []) {
   logToRenderer('INFO', `Recalculando horários de hoje: ${failedPunchType} +${delayMinutes} minutos...`);
 
   const rescheduled = { ...currentSchedule }; // Copia todo o schedule original
@@ -1495,55 +1673,58 @@ function rescheduleWithDelay(currentSchedule, failedPunchType, delayMinutes = 10
     return rescheduled;
   }
 
-  // Copia os valores atuais (todos começam iguais)
-  let newEntrada1 = todayEntry.entrada1;
-  let newSaida1 = todayEntry.saida1;
-  let newEntrada2 = todayEntry.entrada2;
-  let newSaida2 = todayEntry.saida2;
+  // Calcula targets (ancorados se houver pontos, ou schedule original se não houver)
+  const anchoredTargets = calculateAnchoredTargets(todayEntry, existingPoints);
 
-  // Adiciona +10 min no registro que falhou e no seu subsequente vinculado
+  if (anchoredTargets.anchored) {
+    logToRenderer('INFO', `Usando targets ancorados em ${existingPoints.length} ponto(s) existente(s).`);
+  } else {
+    logToRenderer('INFO', 'Usando schedule original (sem pontos registrados para ancoragem).');
+  }
+
+  // Parse helper
+  const parseTime = (timeStr) => {
+    if (!timeStr) return null;
+    const [h, m] = timeStr.split(':').map(Number);
+    return h * 60 + m;
+  };
+
+  // Converte targets para minutos
+  let targetE1 = parseTime(anchoredTargets.entrada1);
+  let targetS1 = parseTime(anchoredTargets.saida1);
+  let targetE2 = parseTime(anchoredTargets.entrada2);
+  let targetS2 = parseTime(anchoredTargets.saida2);
+
+  // Aplica +10 min APENAS no evento que falhou e seu subsequente vinculado
   if (failedPunchType === 'entrada1') {
-    // Falhou entrada1 → entrada1 += 10m e saida2 += 10m
-    const [e1Hour, e1Min] = todayEntry.entrada1.split(':').map(Number);
-    const newE1Time = new Date();
-    newE1Time.setHours(e1Hour, e1Min + delayMinutes, 0, 0);
-    newEntrada1 = `${String(newE1Time.getHours()).padStart(2, '0')}:${String(newE1Time.getMinutes()).padStart(2, '0')}`;
-
-    const [s2Hour, s2Min] = todayEntry.saida2.split(':').map(Number);
-    const newS2Time = new Date();
-    newS2Time.setHours(s2Hour, s2Min + delayMinutes, 0, 0);
-    newSaida2 = `${String(newS2Time.getHours()).padStart(2, '0')}:${String(newS2Time.getMinutes()).padStart(2, '0')}`;
+    // Falhou entrada1 → entrada1 += 10m e saida2 += 10m (propagação)
+    targetE1 += delayMinutes;
+    targetS2 += delayMinutes;
+    logToRenderer('INFO', `entrada1 e saida2 ajustados: +${delayMinutes} min`);
 
   } else if (failedPunchType === 'saida1') {
-    // Falhou saida1 → saida1 += 10m e entrada2 += 10m
-    const [s1Hour, s1Min] = todayEntry.saida1.split(':').map(Number);
-    const newS1Time = new Date();
-    newS1Time.setHours(s1Hour, s1Min + delayMinutes, 0, 0);
-    newSaida1 = `${String(newS1Time.getHours()).padStart(2, '0')}:${String(newS1Time.getMinutes()).padStart(2, '0')}`;
-
-    const [e2Hour, e2Min] = todayEntry.entrada2.split(':').map(Number);
-    const newE2Time = new Date();
-    newE2Time.setHours(e2Hour, e2Min + delayMinutes, 0, 0);
-    newEntrada2 = `${String(newE2Time.getHours()).padStart(2, '0')}:${String(newE2Time.getMinutes()).padStart(2, '0')}`;
+    // Falhou saida1 → saida1 += 10m e entrada2 += 10m (propagação)
+    targetS1 += delayMinutes;
+    targetE2 += delayMinutes;
+    logToRenderer('INFO', `saida1 e entrada2 ajustados: +${delayMinutes} min`);
 
   } else if (failedPunchType === 'entrada2') {
-    // Falhou entrada2 → entrada2 += 10m e saida2 += 10m
-    const [e2Hour, e2Min] = todayEntry.entrada2.split(':').map(Number);
-    const newE2Time = new Date();
-    newE2Time.setHours(e2Hour, e2Min + delayMinutes, 0, 0);
-    newEntrada2 = `${String(newE2Time.getHours()).padStart(2, '0')}:${String(newE2Time.getMinutes()).padStart(2, '0')}`;
-
-    const [s2Hour, s2Min] = todayEntry.saida2.split(':').map(Number);
-    const newS2Time = new Date();
-    newS2Time.setHours(s2Hour, s2Min + delayMinutes, 0, 0);
-    newSaida2 = `${String(newS2Time.getHours()).padStart(2, '0')}:${String(newS2Time.getMinutes()).padStart(2, '0')}`;
+    // Falhou entrada2 → entrada2 += 10m e saida2 += 10m (propagação)
+    targetE2 += delayMinutes;
+    targetS2 += delayMinutes;
+    logToRenderer('INFO', `entrada2 e saida2 ajustados: +${delayMinutes} min`);
 
   } else if (failedPunchType === 'saida2') {
-    // Falhou saida2 → apenas re-tenta até sucesso (não mexe nos outros)
-    logToRenderer('INFO', 'Falha em saida2: tentando novamente sem alterar outros horários.');
-    // Não altera nada, apenas retenta
-    return rescheduled;
+    // Falhou saida2 → saida2 += 10m (sem propagação, é o último)
+    targetS2 += delayMinutes;
+    logToRenderer('INFO', `saida2 ajustado: +${delayMinutes} min`);
   }
+
+  // Converte de volta para strings
+  const newEntrada1 = minutesToTimeString(targetE1);
+  const newSaida1 = minutesToTimeString(targetS1);
+  const newEntrada2 = minutesToTimeString(targetE2);
+  const newSaida2 = minutesToTimeString(targetS2);
 
   // Atualiza APENAS o dia de hoje com os novos horários
   rescheduled[todayPT] = {
@@ -1591,7 +1772,24 @@ function getNextPunch(currentSchedule, existingPoints) {
     const originalScheduleKey = scheduleKeyMap[normalizedDay];
 
     if (originalScheduleKey && currentSchedule[originalScheduleKey] && !currentSchedule[originalScheduleKey].feriado) {
-      const daySchedule = currentSchedule[originalScheduleKey];
+      let daySchedule = currentSchedule[originalScheduleKey];
+
+      // ANCORAGEM: Se é HOJE (i === 0), calcula targets (ancorados se houver pontos, ou original se não)
+      if (i === 0) {
+        const anchoredTargets = calculateAnchoredTargets(daySchedule, existingPoints);
+
+        // Se o dia for INVÁLIDO (pontos fora de ordem ou gap anormal), pula HOJE completamente
+        if (anchoredTargets.invalid) {
+          logToRenderer('AVISO', 'Dia de hoje marcado como INVÁLIDO. Pulando para o próximo dia no schedule.');
+          continue; // Pula para o próximo dia (i = 1, 2, ...)
+        }
+
+        if (anchoredTargets.anchored) {
+          logToRenderer('INFO', `Targets ancorados: E1=${anchoredTargets.entrada1}, S1=${anchoredTargets.saida1}, E2=${anchoredTargets.entrada2}, S2=${anchoredTargets.saida2}`);
+        }
+        daySchedule = anchoredTargets; // Usa targets (ancorados ou originais)
+      }
+
       const punchOrder = ['entrada1', 'saida1', 'entrada2', 'saida2'];
 
       for (const punchType of punchOrder) {
@@ -1896,7 +2094,35 @@ function scheduleNextAutomationHeartbeat(nextPunch) {
 }
 
 async function handleRescheduleAndGetNext(failedPunchType) {
-  const newSchedule = rescheduleWithDelay(automationSchedule, failedPunchType, 10);
+  // Busca os pontos existentes antes de recalcular
+  let existingPoints = [];
+  try {
+    if (playwrightBrowser && automationIsRunning) {
+      const context = await playwrightBrowser.newContext({
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+        locale: 'pt-BR',
+        timezoneId: 'America/Sao_Paulo',
+      });
+      const page = await context.newPage();
+
+      const loginResult = await runAutomationStep(loginToPortal, page, userCredentials.folha, userCredentials.senha);
+      if (loginResult.success) {
+        const pointsResult = await runAutomationStep(syncInitialPoints, page);
+        if (pointsResult.success) {
+          existingPoints = pointsResult.data || [];
+          logToRenderer('INFO', `Pontos existentes antes do recálculo: ${existingPoints.length > 0 ? existingPoints.join(', ') : 'nenhum'}`);
+        }
+      }
+
+      if (page && !page.isClosed()) await page.close();
+      if (context) await context.close();
+    }
+  } catch (err) {
+    logToRenderer('AVISO', `Não foi possível buscar pontos existentes para ancoragem: ${err.message}`);
+  }
+
+  // Recalcula usando ancoragem nos pontos existentes
+  const newSchedule = rescheduleWithDelay(automationSchedule, failedPunchType, 10, existingPoints);
   automationSchedule = newSchedule;
   automationCurrentRetries = 0; // Reseta contadores de retry
 
@@ -1908,7 +2134,7 @@ async function handleRescheduleAndGetNext(failedPunchType) {
       await sendTelegramNotification(
         TELEGRAM_BOT_TOKEN,
         currentAutomationSettings.telegramChatId,
-        `⏰ Horários de hoje (${todayPT}) reajustados após falha no registro de ${failedPunchType}!\n\nNovos horários:\n• Entrada: ${todayEntry.entrada1}\n• Saída Almoço: ${todayEntry.saida1}\n• Retorno Almoço: ${todayEntry.entrada2}\n• Saída: ${todayEntry.saida2}\n\nOs horários foram ajustados em +10 minutos mantendo 8h de trabalho + 1h de almoço.`
+        `⏰ Horários de hoje (${todayPT}) reajustados após falha no registro de ${failedPunchType}!\n\nNovos horários (ancorados em ${existingPoints.length} ponto(s) registrado(s)):\n• Entrada: ${todayEntry.entrada1}\n• Saída Almoço: ${todayEntry.saida1}\n• Retorno Almoço: ${todayEntry.entrada2}\n• Saída: ${todayEntry.saida2}\n\nOs horários foram ajustados em +10 minutos mantendo a carga de trabalho e almoço conforme planejado.`
       );
     }
   } catch (err) {
