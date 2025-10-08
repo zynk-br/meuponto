@@ -33,6 +33,7 @@ const CINCO_SEGUNDOS = 5 * 1000;
 
 autoUpdater.autoDownload = false; // MUITO IMPORTANTE: Desativa o download automático.
 autoUpdater.autoInstallOnAppQuit = true; // Instala na próxima vez que o app for fechado.
+autoUpdater.disableDifferentialDownload = false; // Desabilita download diferencial para evitar erros 404 de versões antigas
 
 // --- Helper Functions ---
 function logToRenderer(level, message) {
@@ -45,8 +46,12 @@ function logToRenderer(level, message) {
   let displayMessage = message;
   if (!getDetailedLogsEnabled()) {
     displayMessage = simplifyLogMessage(level, message);
+    // Se simplifyLogMessage retornar null, significa que a mensagem deve ser ignorada
+    if (displayMessage === null) {
+      return;
+    }
   }
-  
+
   if (mainWindow) {
     mainWindow.webContents.send('log-from-main', { level, message: displayMessage });
   }
@@ -110,6 +115,24 @@ function simplifyLogMessage(level, message) {
     }
   }
   
+  // Filtra logs técnicos do updater que não são relevantes para o usuário
+  if (level === 'INFO' || level === 'ERRO') {
+    if (message.includes('[Updater]')) {
+      // Ignora completamente logs técnicos do updater
+      if (message.includes('Found version') ||
+          message.includes('Downloading update from') ||
+          message.includes('Checked for macOS') ||
+          message.includes('Checked \'uname') ||
+          message.includes('Cached update sha512') ||
+          message.includes('Download block maps') ||
+          message.includes('Cannot download differentially') ||
+          message.includes('New version') && message.includes('has been downloaded to') ||
+          message.includes('requested')) {
+        return null; // Retorna null para indicar que deve ser ignorado
+      }
+    }
+  }
+
   // Simplificações para mensagens INFO com caminhos/localizações
   if (level === 'INFO') {
     if (message.includes('Pontos encontrados para HOJE')) {
@@ -1237,10 +1260,46 @@ async function runAutomationStep(stepFunction, ...args) {
     logToRenderer('ERRO', `O passo da automação falhou: ${error.message}`);
     automationCurrentRetries++;
     if (automationCurrentRetries > MAX_RETRIES) {
-      logToRenderer('ERRO', `Máximo de tentativas alcançado. Parando automação.`);
-      updateAutomationStatusInRenderer('Erro crítico, automação parada.', 'Falha Max. Tentativas');
-      await stopAutomationLogic();
-      return { success: false, critical: true };
+      logToRenderer('ERRO', `Máximo de tentativas alcançado após falha: ${error.message}`);
+
+      // Tenta tirar screenshot se houver uma página disponível nos args
+      let screenshotFullPath = null;
+      const pageArg = args.find(arg => arg && typeof arg === 'object' && arg.screenshot);
+      if (pageArg && !pageArg.isClosed()) {
+        try {
+          const screenshotFilename = `error_max_retries_${Date.now()}.png`;
+          screenshotFullPath = path.join(app.getPath('userData'), screenshotFilename);
+          await pageArg.screenshot({ path: screenshotFullPath });
+          logToRenderer('DEBUG', `Screenshot da falha crítica salvo em: ${screenshotFilename}`);
+        } catch (ssError) {
+          logToRenderer('ERRO', `Falha ao tirar screenshot: ${ssError.message}`);
+        }
+      }
+
+      // Envia notificação Telegram
+      if (currentAutomationSettings && currentAutomationSettings.telegramChatId && TELEGRAM_BOT_TOKEN) {
+        try {
+          await sendTelegramNotification(
+            TELEGRAM_BOT_TOKEN,
+            currentAutomationSettings.telegramChatId,
+            `🔴 Falha crítica após ${MAX_RETRIES} tentativas: ${error.message.substring(0, 150)}`
+          );
+
+          if (screenshotFullPath && fs.existsSync(screenshotFullPath)) {
+            await sendTelegramPhoto(
+              TELEGRAM_BOT_TOKEN,
+              currentAutomationSettings.telegramChatId,
+              screenshotFullPath,
+              `Screenshot da falha crítica`
+            );
+          }
+        } catch (err) {
+          logToRenderer('AVISO', `Falha ao enviar notificação Telegram: ${err.message}`);
+        }
+      }
+
+      updateAutomationStatusInRenderer('Erro crítico, recalculando horários...', 'Falha Max. Tentativas');
+      return { success: false, critical: true, shouldReschedule: true };
     } else {
       logToRenderer('AVISO', `tentando novamente (${automationCurrentRetries}/${MAX_RETRIES})...`);
       updateAutomationStatusInRenderer(`Falha, tentando novamente (${automationCurrentRetries}/${MAX_RETRIES})...`, error.message.substring(0, 50));
@@ -1419,6 +1478,85 @@ async function syncInitialPoints(page) {
     logToRenderer('INFO', 'Erro não crítico ao tentar sincronizar pontos: ' + error.message);
     return [];
   }
+}
+
+function rescheduleWithDelay(currentSchedule, failedPunchType, delayMinutes = 10) {
+  logToRenderer('INFO', `Recalculando horários de hoje: ${failedPunchType} +${delayMinutes} minutos...`);
+
+  const rescheduled = { ...currentSchedule }; // Copia todo o schedule original
+
+  // Pega o dia da semana atual
+  const todayPT = new Date().toLocaleDateString('pt-BR', { weekday: 'long' });
+  const todayEntry = currentSchedule[todayPT];
+
+  // Se hoje não tem entrada definida ou é feriado, não altera nada
+  if (!todayEntry || todayEntry.feriado || !todayEntry.entrada1) {
+    logToRenderer('AVISO', `Hoje (${todayPT}) não tem horários para reajustar ou é feriado.`);
+    return rescheduled;
+  }
+
+  // Copia os valores atuais (todos começam iguais)
+  let newEntrada1 = todayEntry.entrada1;
+  let newSaida1 = todayEntry.saida1;
+  let newEntrada2 = todayEntry.entrada2;
+  let newSaida2 = todayEntry.saida2;
+
+  // Adiciona +10 min no registro que falhou e no seu subsequente vinculado
+  if (failedPunchType === 'entrada1') {
+    // Falhou entrada1 → entrada1 += 10m e saida2 += 10m
+    const [e1Hour, e1Min] = todayEntry.entrada1.split(':').map(Number);
+    const newE1Time = new Date();
+    newE1Time.setHours(e1Hour, e1Min + delayMinutes, 0, 0);
+    newEntrada1 = `${String(newE1Time.getHours()).padStart(2, '0')}:${String(newE1Time.getMinutes()).padStart(2, '0')}`;
+
+    const [s2Hour, s2Min] = todayEntry.saida2.split(':').map(Number);
+    const newS2Time = new Date();
+    newS2Time.setHours(s2Hour, s2Min + delayMinutes, 0, 0);
+    newSaida2 = `${String(newS2Time.getHours()).padStart(2, '0')}:${String(newS2Time.getMinutes()).padStart(2, '0')}`;
+
+  } else if (failedPunchType === 'saida1') {
+    // Falhou saida1 → saida1 += 10m e entrada2 += 10m
+    const [s1Hour, s1Min] = todayEntry.saida1.split(':').map(Number);
+    const newS1Time = new Date();
+    newS1Time.setHours(s1Hour, s1Min + delayMinutes, 0, 0);
+    newSaida1 = `${String(newS1Time.getHours()).padStart(2, '0')}:${String(newS1Time.getMinutes()).padStart(2, '0')}`;
+
+    const [e2Hour, e2Min] = todayEntry.entrada2.split(':').map(Number);
+    const newE2Time = new Date();
+    newE2Time.setHours(e2Hour, e2Min + delayMinutes, 0, 0);
+    newEntrada2 = `${String(newE2Time.getHours()).padStart(2, '0')}:${String(newE2Time.getMinutes()).padStart(2, '0')}`;
+
+  } else if (failedPunchType === 'entrada2') {
+    // Falhou entrada2 → entrada2 += 10m e saida2 += 10m
+    const [e2Hour, e2Min] = todayEntry.entrada2.split(':').map(Number);
+    const newE2Time = new Date();
+    newE2Time.setHours(e2Hour, e2Min + delayMinutes, 0, 0);
+    newEntrada2 = `${String(newE2Time.getHours()).padStart(2, '0')}:${String(newE2Time.getMinutes()).padStart(2, '0')}`;
+
+    const [s2Hour, s2Min] = todayEntry.saida2.split(':').map(Number);
+    const newS2Time = new Date();
+    newS2Time.setHours(s2Hour, s2Min + delayMinutes, 0, 0);
+    newSaida2 = `${String(newS2Time.getHours()).padStart(2, '0')}:${String(newS2Time.getMinutes()).padStart(2, '0')}`;
+
+  } else if (failedPunchType === 'saida2') {
+    // Falhou saida2 → apenas re-tenta até sucesso (não mexe nos outros)
+    logToRenderer('INFO', 'Falha em saida2: tentando novamente sem alterar outros horários.');
+    // Não altera nada, apenas retenta
+    return rescheduled;
+  }
+
+  // Atualiza APENAS o dia de hoje com os novos horários
+  rescheduled[todayPT] = {
+    entrada1: newEntrada1,
+    saida1: newSaida1,
+    entrada2: newEntrada2,
+    saida2: newSaida2,
+    feriado: false
+  };
+
+  logToRenderer('INFO', `${todayPT} reajustado (${failedPunchType}): E1=${newEntrada1}, S1=${newSaida1}, E2=${newEntrada2}, S2=${newSaida2}`);
+
+  return rescheduled;
 }
 
 function getNextPunch(currentSchedule, existingPoints) {
@@ -1660,7 +1798,15 @@ function scheduleNextAutomationHeartbeat(nextPunch) {
 
   if (timeToPunch < -tolerance) { // Já passou muito da hora
     logToRenderer('AVISO', `Batida ${nextPunch.type} às ${nextPunch.time} em ${nextPunch.dateTime.toLocaleDateString('pt-BR')} já passou. Pulando e reagendando.`);
-    syncAndGetNext().then(newNextPunch => scheduleNextAutomationHeartbeat(newNextPunch));
+    syncAndGetNext().then(async (newNextPunch) => {
+      if (newNextPunch && newNextPunch.shouldReschedule) {
+        const failedType = newNextPunch.failedPunchType || nextPunch.type;
+        const rescheduledNextPunch = await handleRescheduleAndGetNext(failedType);
+        scheduleNextAutomationHeartbeat(rescheduledNextPunch);
+      } else {
+        scheduleNextAutomationHeartbeat(newNextPunch);
+      }
+    });
     return;
   }
 
@@ -1688,31 +1834,91 @@ function scheduleNextAutomationHeartbeat(nextPunch) {
       );
       const page = await context.newPage();
       let punchSuccessful = false;
+      let shouldReschedule = false;
       try {
-        await runAutomationStep(loginToPortal, page, userCredentials.folha, userCredentials.senha);
-        const punchResult = await runAutomationStep(performPunch, page, nextPunch);
-        punchSuccessful = punchResult.success && punchResult.data === 'success';
+        const loginResult = await runAutomationStep(loginToPortal, page, userCredentials.folha, userCredentials.senha);
+
+        // Se login falhou criticamente e precisa reagendar
+        if (loginResult.critical && loginResult.shouldReschedule) {
+          shouldReschedule = true;
+          logToRenderer('AVISO', 'Falha crítica no login. Reagendando horários...');
+        } else if (loginResult.success) {
+          const punchResult = await runAutomationStep(performPunch, page, nextPunch);
+
+          // Se punch falhou criticamente e precisa reagendar
+          if (punchResult.critical && punchResult.shouldReschedule) {
+            shouldReschedule = true;
+            logToRenderer('AVISO', 'Falha crítica no registro. Reagendando horários...');
+          } else {
+            punchSuccessful = punchResult.success && punchResult.data === 'success';
+          }
+        }
       } catch (e) {
         logToRenderer('ERRO', `Erro crítico durante o processo de batida ${nextPunch.type}: ${e.message}`);
       } finally {
         if (page && !page.isClosed()) await page.close();
       }
-      // Só reagenda se o ponto foi batido com sucesso, para pegar novos pontos existentes.
-      // Se falhou, a lógica de retry em runAutomationStep já tentou. Se esgotou, a automação parou.
-      // Se não foi crítico, mas falhou (ex: performPunch retornou 'failed'), precisa decidir se reagenda ou para.
-      // Por agora, reagendaremos para reavaliar a situação.
+
+      // Se precisa reagendar devido a falha crítica
+      if (shouldReschedule) {
+        const newNextPunch = await handleRescheduleAndGetNext(nextPunch.type);
+        scheduleNextAutomationHeartbeat(newNextPunch);
+        return;
+      }
+
+      // Fluxo normal: reagenda para sincronizar e pegar próxima batida
       const newNextPunch = await syncAndGetNext();
-      scheduleNextAutomationHeartbeat(newNextPunch);
+      if (newNextPunch && newNextPunch.shouldReschedule) {
+        // Se retornou shouldReschedule, precisa descobrir qual punch estava tentando
+        // Usa o próximo punch do schedule como referência
+        const failedType = newNextPunch.failedPunchType || 'entrada1';
+        const rescheduledNextPunch = await handleRescheduleAndGetNext(failedType);
+        scheduleNextAutomationHeartbeat(rescheduledNextPunch);
+      } else {
+        scheduleNextAutomationHeartbeat(newNextPunch);
+      }
 
     } else if (currentTime < nextPunch.dateTime.getTime()) { // Ainda não é hora, reagendar heartbeat
       scheduleNextAutomationHeartbeat(nextPunch);
     } else { // Passou da janela de tolerância
       logToRenderer('AVISO', `Janela de tolerância para ${nextPunch.type} @ ${nextPunch.time} perdida.`);
       const newNextPunch = await syncAndGetNext();
-      scheduleNextAutomationHeartbeat(newNextPunch);
+      if (newNextPunch && newNextPunch.shouldReschedule) {
+        const failedType = newNextPunch.failedPunchType || nextPunch.type;
+        const rescheduledNextPunch = await handleRescheduleAndGetNext(failedType);
+        scheduleNextAutomationHeartbeat(rescheduledNextPunch);
+      } else {
+        scheduleNextAutomationHeartbeat(newNextPunch);
+      }
     }
   }, heartbeatInterval);
   automationTimers.push(nextPunchTimer); // Keep track of active timers for cleanup
+}
+
+async function handleRescheduleAndGetNext(failedPunchType) {
+  const newSchedule = rescheduleWithDelay(automationSchedule, failedPunchType, 10);
+  automationSchedule = newSchedule;
+  automationCurrentRetries = 0; // Reseta contadores de retry
+
+  // Envia notificação sobre reagendamento
+  try {
+    const todayPT = new Date().toLocaleDateString('pt-BR', { weekday: 'long' });
+    const todayEntry = newSchedule[todayPT];
+    if (todayEntry && todayEntry.entrada1) {
+      await sendTelegramNotification(
+        TELEGRAM_BOT_TOKEN,
+        currentAutomationSettings.telegramChatId,
+        `⏰ Horários de hoje (${todayPT}) reajustados após falha no registro de ${failedPunchType}!\n\nNovos horários:\n• Entrada: ${todayEntry.entrada1}\n• Saída Almoço: ${todayEntry.saida1}\n• Retorno Almoço: ${todayEntry.entrada2}\n• Saída: ${todayEntry.saida2}\n\nOs horários foram ajustados em +10 minutos mantendo 8h de trabalho + 1h de almoço.`
+      );
+    }
+  } catch (err) {
+    logToRenderer('AVISO', `Falha ao enviar notificação de reagendamento: ${err.message}`);
+  }
+
+  logToRenderer('INFO', 'Continuando automação com novos horários...');
+
+  // Tenta novamente com os novos horários
+  return await syncAndGetNext();
 }
 
 async function syncAndGetNext() {
@@ -1728,11 +1934,34 @@ async function syncAndGetNext() {
   const page = await context.newPage();
   let nextPunchData = null;
   try {
-    await runAutomationStep(loginToPortal, page, userCredentials.folha, userCredentials.senha);
+    const loginResult = await runAutomationStep(loginToPortal, page, userCredentials.folha, userCredentials.senha);
+
+    // Se login falhou criticamente mas pode reagendar, não para a automação
+    if (loginResult.critical && loginResult.shouldReschedule) {
+      logToRenderer('AVISO', 'Falha crítica no login durante sincronização. Reagendamento será tratado.');
+      if (page && !page.isClosed()) await page.close();
+
+      // Tenta descobrir qual seria o próximo punch para informar qual tipo falhou
+      try {
+        const tempPoints = await syncInitialPoints(page);
+        const tempNextPunch = getNextPunch(automationSchedule, tempPoints || []);
+        return { shouldReschedule: true, failedPunchType: tempNextPunch?.type || 'entrada1' };
+      } catch (err) {
+        return { shouldReschedule: true, failedPunchType: 'entrada1' };
+      }
+    }
+
+    // Se falhou criticamente sem possibilidade de reagendamento, para
+    if (loginResult.critical && !loginResult.shouldReschedule) {
+      if (page && !page.isClosed()) await page.close();
+      return null;
+    }
+
     const existingPointsResult = await runAutomationStep(syncInitialPoints, page);
 
     // Se runAutomationStep parou a automação devido a retentativas críticas, existingPointsResult.critical será true
     if (existingPointsResult.success === false && existingPointsResult.critical) {
+      if (page && !page.isClosed()) await page.close();
       return null; // A automação já foi parada
     }
 
@@ -1772,7 +2001,13 @@ ipcMain.on('start-automation', async (event, { schedule, credentials, settings }
     }
 
     const nextPunch = await syncAndGetNext();
-    scheduleNextAutomationHeartbeat(nextPunch);
+    if (nextPunch && nextPunch.shouldReschedule) {
+      const failedType = nextPunch.failedPunchType || 'entrada1';
+      const rescheduledNextPunch = await handleRescheduleAndGetNext(failedType);
+      scheduleNextAutomationHeartbeat(rescheduledNextPunch);
+    } else {
+      scheduleNextAutomationHeartbeat(nextPunch);
+    }
 
   } catch (error) {
     logToRenderer('ERRO', `Erro crítico ao inicar automação: ${error.message}`);
