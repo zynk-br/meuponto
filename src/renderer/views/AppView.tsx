@@ -73,15 +73,12 @@ const DayRowEditor: React.FC<{ day: DayOfWeek, entry: TimeEntry, onChange: (newE
 const AppView: React.FC = () => {
   const {
     addLog,
-    schedule,
-    updateScheduleEntry,
-    updateFullSchedule,
-    clearSchedule,
     automationMode,
     setAutomationMode,
     automationState,
     settings,
-    currentUserCredentials
+    currentUserCredentials,
+    updateSettings
   } = useAppContext();
 
   // Estados separados para cada modo (não se influenciam)
@@ -273,6 +270,54 @@ const AppView: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialHourMonthlyAuto, automationMode]);
 
+  // Regeneração automática de horários ao fim do ciclo (semana/mês)
+  useEffect(() => {
+    // Só ativa se a opção estiver habilitada nas configurações
+    if (!settings.autoRegenerateSchedules) return;
+
+    const checkAndRegenerate = () => {
+      const now = new Date();
+      const dayOfWeek = now.getDay(); // 0 = Domingo, 6 = Sábado
+      const dayOfMonth = now.getDate();
+
+      // Semanal Automático: regenera toda segunda-feira (dia 1)
+      if (automationMode === AutomationMode.WEEKLY_AUTO && dayOfWeek === 1) {
+        // Verifica se já regenerou hoje
+        const lastRegenKey = 'lastWeeklyRegen';
+        const lastRegen = localStorage.getItem(lastRegenKey);
+        const todayKey = now.toDateString();
+
+        if (lastRegen !== todayKey) {
+          addLog(LogLevel.INFO, '📅 Início de nova semana detectado! Regenerando horários semanais automáticos...');
+          generateWeeklyAutoSchedule(initialHourWeeklyAuto);
+          localStorage.setItem(lastRegenKey, todayKey);
+        }
+      }
+
+      // Mensal Automático: regenera todo dia 1º do mês
+      if (automationMode === AutomationMode.MONTHLY_AUTO && dayOfMonth === 1) {
+        // Verifica se já regenerou este mês
+        const lastRegenKey = 'lastMonthlyRegen';
+        const lastRegen = localStorage.getItem(lastRegenKey);
+        const monthKey = `${now.getFullYear()}-${now.getMonth() + 1}`;
+
+        if (lastRegen !== monthKey) {
+          addLog(LogLevel.INFO, '📅 Início de novo mês detectado! Regenerando horários mensais automáticos...');
+          generateMonthlyAutoSchedule(initialHourMonthlyAuto);
+          localStorage.setItem(lastRegenKey, monthKey);
+        }
+      }
+    };
+
+    // Verifica a cada hora (3600000 ms)
+    const interval = setInterval(checkAndRegenerate, 3600000);
+
+    // Verifica imediatamente ao montar
+    checkAndRegenerate();
+
+    return () => clearInterval(interval);
+  }, [settings.autoRegenerateSchedules, automationMode, initialHourWeeklyAuto, initialHourMonthlyAuto, generateWeeklyAutoSchedule, generateMonthlyAutoSchedule, addLog]);
+
   // Converte o schedule mensal para o formato semanal esperado pela automação
   const convertMonthlyToWeeklySchedule = (monthlySchedule: MonthlySchedule): Schedule => {
     const today = new Date();
@@ -358,8 +403,27 @@ const AppView: React.FC = () => {
 
   const handleClear = () => {
     if (window.confirm("Tem certeza que deseja limpar todos os horários da grade?")) {
-      clearSchedule();
-      addLog(LogLevel.WARNING, "Todos os horários foram limpos pelo usuário.");
+      // Limpa o schedule específico do modo ativo
+      if (automationMode === AutomationMode.WEEKLY_MANUAL) {
+        setWeeklyManualSchedule({
+          [DayOfWeek.MONDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
+          [DayOfWeek.TUESDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
+          [DayOfWeek.WEDNESDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
+          [DayOfWeek.THURSDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
+          [DayOfWeek.FRIDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
+        });
+      } else if (automationMode === AutomationMode.WEEKLY_AUTO) {
+        setWeeklyAutoSchedule({
+          [DayOfWeek.MONDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
+          [DayOfWeek.TUESDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
+          [DayOfWeek.WEDNESDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
+          [DayOfWeek.THURSDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
+          [DayOfWeek.FRIDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
+        });
+      } else if (automationMode === AutomationMode.MONTHLY_AUTO) {
+        setMonthlyAutoSchedule({});
+      }
+      addLog(LogLevel.WARNING, `Todos os horários do modo ${automationMode} foram limpos pelo usuário.`);
     }
   };
 
@@ -374,9 +438,21 @@ const AppView: React.FC = () => {
 
   const handleExportCalendar = async () => {
     addLog(LogLevel.INFO, "Exportando horários para calendário...");
+
+    // Determina qual schedule usar baseado no modo ativo
+    let scheduleToExport: Schedule;
+    if (automationMode === AutomationMode.WEEKLY_MANUAL) {
+      scheduleToExport = weeklyManualSchedule;
+    } else if (automationMode === AutomationMode.WEEKLY_AUTO) {
+      scheduleToExport = weeklyAutoSchedule;
+    } else {
+      // Para MONTHLY_AUTO, converte para formato semanal
+      scheduleToExport = convertMonthlyToWeeklySchedule(monthlyAutoSchedule);
+    }
+
     if (window.electronAPI) {
       try {
-        const result = await window.electronAPI.exportCalendar(schedule);
+        const result = await window.electronAPI.exportCalendar(scheduleToExport);
         if (result.success) {
           addLog(LogLevel.SUCCESS, `Calendário exportado com sucesso: ${result.path}`);
         } else {
@@ -413,35 +489,122 @@ const AppView: React.FC = () => {
           ))}
         </div>
          {automationMode === AutomationMode.WEEKLY_AUTO && (
-          <div className="mt-4">
-            <label htmlFor="initialHourWeeklyAuto" className="block text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-1">
-              Hora base para Entrada 1 (HH:MM):
-            </label>
-            <input
-              type="time"
-              id="initialHourWeeklyAuto"
-              value={initialHourWeeklyAuto}
-              disabled={automationState.isRunning}
-              onChange={(e) => setInitialHourWeeklyAuto(e.target.value)}
-              className="p-2 border rounded-md text-sm bg-white dark:bg-secondary-700 text-secondary-700 dark:text-secondary-200 border-secondary-300 dark:border-secondary-600 focus:ring-primary-500 focus:border-primary-500 disabled:opacity-60"
-            />
-             <p className="text-xs text-secondary-500 dark:text-secondary-400 mt-1">A Entrada 1 será aleatória dentro desta hora. Outros horários serão baseados nela.</p>
+          <div className="mt-4 pt-4 border-t border-secondary-200 dark:border-secondary-700">
+            <div className="flex items-end gap-6">
+              {/* Campo de Hora Base */}
+              <div className="flex-1">
+                <label htmlFor="initialHourWeeklyAuto" className="block text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-2">
+                  <i className="fas fa-clock mr-2"></i>
+                  Hora base para Entrada 1
+                </label>
+                <input
+                  type="time"
+                  id="initialHourWeeklyAuto"
+                  value={initialHourWeeklyAuto}
+                  disabled={automationState.isRunning}
+                  onChange={(e) => setInitialHourWeeklyAuto(e.target.value)}
+                  className="w-full px-3 py-2 text-sm bg-white dark:bg-secondary-800 text-secondary-900 dark:text-secondary-100 border border-secondary-300 dark:border-secondary-600 rounded-md focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                />
+              </div>
+
+              {/* Toggle de Regeneração Automática */}
+              <div className="flex-1">
+                <span className="block text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-2">
+                  <i className="fas fa-sync-alt mr-2"></i>
+                  Regenerar automaticamente
+                </span>
+                <label htmlFor="autoRegenerateToggleWeekly" className="flex items-center justify-between px-3 py-2 bg-white dark:bg-secondary-800 border border-secondary-300 dark:border-secondary-600 rounded-md cursor-pointer hover:bg-secondary-50 dark:hover:bg-secondary-700/30">
+                  <span className="text-sm text-secondary-600 dark:text-secondary-400">
+                    {settings.autoRegenerateSchedules ? 'Ativado' : 'Desativado'}
+                  </span>
+                  <div className="relative inline-flex items-center">
+                    <input
+                      type="checkbox"
+                      id="autoRegenerateToggleWeekly"
+                      className="sr-only peer"
+                      checked={settings.autoRegenerateSchedules || false}
+                      disabled={automationState.isRunning}
+                      onChange={(e) => {
+                        const newValue = e.target.checked;
+                        updateSettings({ autoRegenerateSchedules: newValue });
+                        addLog(LogLevel.INFO, `Regeneração automática ${newValue ? 'ativada' : 'desativada'}.`);
+                      }}
+                    />
+                    <div className="w-11 h-6 bg-secondary-200 dark:bg-secondary-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-secondary-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600 peer-disabled:opacity-50"></div>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            {/* Descrições abaixo */}
+            <div className="flex gap-6 mt-2">
+              <p className="flex-1 text-xs text-secondary-500 dark:text-secondary-400">
+                A Entrada 1 será aleatória dentro desta hora. Outros horários serão baseados nela.
+              </p>
+              <p className="flex-1 text-xs text-secondary-500 dark:text-secondary-400">
+                Toda segunda-feira, novos horários serão gerados automaticamente.
+              </p>
+            </div>
           </div>
         )}
+
          {automationMode === AutomationMode.MONTHLY_AUTO && (
-          <div className="mt-4">
-            <label htmlFor="initialHourMonthlyAuto" className="block text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-1">
-              Hora base para Entrada 1 (HH:MM):
-            </label>
-            <input
-              type="time"
-              id="initialHourMonthlyAuto"
-              value={initialHourMonthlyAuto}
-              disabled={automationState.isRunning}
-              onChange={(e) => setInitialHourMonthlyAuto(e.target.value)}
-              className="p-2 border rounded-md text-sm bg-white dark:bg-secondary-700 text-secondary-700 dark:text-secondary-200 border-secondary-300 dark:border-secondary-600 focus:ring-primary-500 focus:border-primary-500 disabled:opacity-60"
-            />
-             <p className="text-xs text-secondary-500 dark:text-secondary-400 mt-1">Todos os horários do mês serão gerados automaticamente sem repetições, baseados nesta hora.</p>
+          <div className="mt-4 pt-4 border-t border-secondary-200 dark:border-secondary-700">
+            <div className="flex items-end gap-6">
+              {/* Campo de Hora Base */}
+              <div className="flex-1">
+                <label htmlFor="initialHourMonthlyAuto" className="block text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-2">
+                  <i className="fas fa-clock mr-2"></i>
+                  Hora base para Entrada 1
+                </label>
+                <input
+                  type="time"
+                  id="initialHourMonthlyAuto"
+                  value={initialHourMonthlyAuto}
+                  disabled={automationState.isRunning}
+                  onChange={(e) => setInitialHourMonthlyAuto(e.target.value)}
+                  className="w-full px-3 py-2 text-sm bg-white dark:bg-secondary-800 text-secondary-900 dark:text-secondary-100 border border-secondary-300 dark:border-secondary-600 rounded-md focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                />
+              </div>
+
+              {/* Toggle de Regeneração Automática */}
+              <div className="flex-1">
+                <span className="block text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-2">
+                  <i className="fas fa-sync-alt mr-2"></i>
+                  Regenerar automaticamente
+                </span>
+                <label htmlFor="autoRegenerateToggleMonthly" className="flex items-center justify-between px-3 py-2 bg-white dark:bg-secondary-800 border border-secondary-300 dark:border-secondary-600 rounded-md cursor-pointer hover:bg-secondary-50 dark:hover:bg-secondary-700/30">
+                  <span className="text-sm text-secondary-600 dark:text-secondary-400">
+                    {settings.autoRegenerateSchedules ? 'Ativado' : 'Desativado'}
+                  </span>
+                  <div className="relative inline-flex items-center">
+                    <input
+                      type="checkbox"
+                      id="autoRegenerateToggleMonthly"
+                      className="sr-only peer"
+                      checked={settings.autoRegenerateSchedules || false}
+                      disabled={automationState.isRunning}
+                      onChange={(e) => {
+                        const newValue = e.target.checked;
+                        updateSettings({ autoRegenerateSchedules: newValue });
+                        addLog(LogLevel.INFO, `Regeneração automática ${newValue ? 'ativada' : 'desativada'}.`);
+                      }}
+                    />
+                    <div className="w-11 h-6 bg-secondary-200 dark:bg-secondary-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-secondary-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600 peer-disabled:opacity-50"></div>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            {/* Descrições abaixo */}
+            <div className="flex gap-6 mt-2">
+              <p className="flex-1 text-xs text-secondary-500 dark:text-secondary-400">
+                Todos os horários do mês serão gerados automaticamente sem repetições, baseados nesta hora.
+              </p>
+              <p className="flex-1 text-xs text-secondary-500 dark:text-secondary-400">
+                Todo dia 1º do mês, novos horários serão gerados automaticamente.
+              </p>
+            </div>
           </div>
         )}
       </div>

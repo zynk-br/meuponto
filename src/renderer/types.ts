@@ -49,6 +49,7 @@ export interface Settings {
   saveLoginDetails: boolean;
   savedFolha: string;
   detailedLogs?: boolean;
+  autoRegenerateSchedules?: boolean; // Regenera horários automaticamente ao fim do ciclo (semana/mês)
 }
 
 export interface TimeEntry {
