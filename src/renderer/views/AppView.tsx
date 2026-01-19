@@ -5,7 +5,7 @@ import { DayOfWeek, LogLevel, TimeEntry, Schedule, AutomationMode, BrowserStatus
 import { DAYS_OF_WEEK } from '../constants'; // Ajustado
 import MonthlyCalendar from '../components/MonthlyCalendar';
 
-const DayRowEditor: React.FC<{ day: DayOfWeek, entry: TimeEntry, onChange: (newEntry: TimeEntry) => void, readonly: boolean }> = ({ day, entry, onChange, readonly }) => {
+const DayRowEditor: React.FC<{ day: DayOfWeek, entry: TimeEntry, onChange: (newEntry: TimeEntry) => void, readonly: boolean, preAssignedInterval?: boolean }> = ({ day, entry, onChange, readonly, preAssignedInterval }) => {
 
   // Função auxiliar para adicionar horas a um horário
   const addHoursToTime = (timeStr: string, hoursToAdd: number, minutesToAdd: number = 0): string => {
@@ -44,15 +44,19 @@ const DayRowEditor: React.FC<{ day: DayOfWeek, entry: TimeEntry, onChange: (newE
   return (
     <tr className="border-b border-secondary-200 dark:border-secondary-700 hover:bg-secondary-50 dark:hover:bg-secondary-800 transition-colors">
       <td className="py-3 px-4 text-sm font-medium text-secondary-800 dark:text-secondary-200">{day}</td>
-      {[ 'entrada1', 'saida1', 'entrada2', 'saida2'].map((field) => (
+      {['entrada1', 'saida1', 'entrada2', 'saida2'].map((field) => (
         <td key={field} className="py-2 px-3">
           <input
             type="time"
-            value={entry[field as keyof Omit<TimeEntry, 'feriado'>]}
+            value={
+              (preAssignedInterval && field === 'saida1') ? '12:00' :
+                (preAssignedInterval && field === 'entrada2') ? '13:00' :
+                  entry[field as keyof Omit<TimeEntry, 'feriado'>]
+            }
             onChange={(e) => handleTimeChange(field as keyof Omit<TimeEntry, 'feriado'>, e.target.value)}
-            disabled={entry.feriado || readonly}
+            disabled={entry.feriado || readonly || (preAssignedInterval && (field === 'saida1' || field === 'entrada2'))}
             readOnly={readonly}
-            className={`w-full p-2 border rounded-md text-sm bg-white dark:bg-secondary-700 text-secondary-700 dark:text-secondary-200 border-secondary-300 dark:border-secondary-600 focus:ring-primary-500 focus:border-primary-500 ${ (entry.feriado || readonly) ? 'bg-secondary-100 dark:bg-secondary-800 cursor-not-allowed' : ''}`}
+            className={`w-full p-2 border rounded-md text-sm bg-white dark:bg-secondary-700 text-secondary-700 dark:text-secondary-200 border-secondary-300 dark:border-secondary-600 focus:ring-primary-500 focus:border-primary-500 ${(entry.feriado || readonly || (preAssignedInterval && (field === 'saida1' || field === 'entrada2'))) ? 'bg-secondary-100 dark:bg-secondary-800 cursor-not-allowed text-secondary-400' : ''}`}
           />
         </td>
       ))}
@@ -80,6 +84,65 @@ const AppView: React.FC = () => {
     currentUserCredentials,
     updateSettings
   } = useAppContext();
+
+  const renderPreAssignedIntervalToggle = (mode: AutomationMode, compact = false) => (
+    <div className={compact ? "flex-1" : "mt-4 pt-4 border-t border-secondary-200 dark:border-secondary-700"}>
+      <div className={compact ? "" : "flex items-center justify-between bg-white dark:bg-secondary-800 p-3 rounded-md border border-secondary-200 dark:border-secondary-700"}>
+        {!compact && (
+          <div className="flex items-center">
+            <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg text-blue-600 dark:text-blue-400 mr-3">
+              <i className="fas fa-utensils"></i>
+            </div>
+            <div>
+              <span className="block text-sm font-medium text-secondary-900 dark:text-secondary-100">
+                Pré-assinalação de Intervalo
+              </span>
+              <span className="block text-xs text-secondary-500 dark:text-secondary-400">
+                Pula Saída 1 e Entrada 2 (12:00 - 13:00) para o modo <strong>{mode}</strong>.
+              </span>
+            </div>
+          </div>
+        )}
+        {compact && (
+          <span className="block text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-2">
+            <i className="fas fa-utensils mr-2"></i>
+            Pré-assinalação de Intervalo
+          </span>
+        )}
+
+        <label htmlFor={`preAssignedIntervalToggle_${mode}`} className={`flex items-center ${compact ? 'justify-between px-3 py-2 bg-white dark:bg-secondary-800 border border-secondary-300 dark:border-secondary-600 rounded-md cursor-pointer hover:bg-secondary-50 dark:hover:bg-secondary-700/30' : 'cursor-pointer'}`}>
+          <span className={`text-sm ${compact ? 'text-secondary-600 dark:text-secondary-400' : 'mr-3 font-medium text-secondary-700 dark:text-secondary-300'}`}>
+            {(settings.preAssignedIntervalConfig && settings.preAssignedIntervalConfig[mode]) ? 'Ativado' : 'Desativado'}
+          </span>
+          <div className="relative inline-flex items-center">
+            <input
+              type="checkbox"
+              id={`preAssignedIntervalToggle_${mode}`}
+              className="sr-only peer"
+              checked={(settings.preAssignedIntervalConfig && settings.preAssignedIntervalConfig[mode]) || false}
+              disabled={automationState.isRunning}
+              onChange={(e) => {
+                const newValue = e.target.checked;
+                const currentConfig = settings.preAssignedIntervalConfig || {};
+                const newConfig = { ...currentConfig, [mode]: newValue };
+
+                if (newValue) {
+                  if (window.confirm(`Ao ativar para ${mode}, os campos de Saída 1 e Entrada 2 serão bloqueados e ignorados (12:00-13:00 fixo). Continuar?`)) {
+                    updateSettings({ preAssignedIntervalConfig: newConfig });
+                    addLog(LogLevel.INFO, `Pré-assinalação de intervalo ativada para ${mode}.`);
+                  }
+                } else {
+                  updateSettings({ preAssignedIntervalConfig: newConfig });
+                  addLog(LogLevel.INFO, `Pré-assinalação de intervalo desativada para ${mode}.`);
+                }
+              }}
+            />
+            <div className="w-11 h-6 bg-secondary-200 dark:bg-secondary-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-secondary-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600 peer-disabled:opacity-50"></div>
+          </div>
+        </label>
+      </div>
+    </div>
+  );
 
   // Estados separados para cada modo (não se influenciam)
   const [weeklyManualSchedule, setWeeklyManualSchedule] = useState<Schedule>({
@@ -174,7 +237,7 @@ const AppView: React.FC = () => {
     setMonthlyAutoSchedule(newMonthlySchedule);
     addLog(LogLevel.SUCCESS, `Calendário mensal gerado com ${Object.keys(newMonthlySchedule).length} dias únicos.`);
   }, [addLog]);
-  
+
   const generateRandomMinute = (min: number = 0, max: number = 59) => {
     return Math.floor(Math.random() * (max - min + 1)) + min;
   };
@@ -207,11 +270,11 @@ const AppView: React.FC = () => {
     if (isNaN(hours) || isNaN(minutes)) return null;
     return { hours, minutes };
   };
-  
+
   const addHours = (timeStr: string, hoursToAdd: number, minutesToAdd: number = 0): string => {
     const time = parseTime(timeStr);
     if (!time) return '';
-    
+
     let totalMinutes = time.hours * 60 + time.minutes + hoursToAdd * 60 + minutesToAdd;
     const newHours = Math.floor(totalMinutes / 60) % 24; // Ensure hours wrap around 24
     const newMinutes = totalMinutes % 60;
@@ -226,7 +289,7 @@ const AppView: React.FC = () => {
     }
 
     addLog(LogLevel.INFO, `Gerando horários semanais automáticos com base em ${baseStartTime}...`);
-    const newSchedule: Schedule = { ...weeklyAutoSchedule }; 
+    const newSchedule: Schedule = { ...weeklyAutoSchedule };
 
     DAYS_OF_WEEK.forEach(day => {
       if (newSchedule[day].feriado) {
@@ -368,14 +431,14 @@ const AppView: React.FC = () => {
 
   const handleExecute = () => {
     if (!currentUserCredentials || !currentUserCredentials.folha || !currentUserCredentials.senha) {
-        addLog(LogLevel.ERROR, "Credenciais do usuário não encontradas. Faça login novamente.");
-        alert("Erro: Credenciais não encontradas. Por favor, faça login novamente.");
-        return;
+      addLog(LogLevel.ERROR, "Credenciais do usuário não encontradas. Faça login novamente.");
+      alert("Erro: Credenciais não encontradas. Por favor, faça login novamente.");
+      return;
     }
     if (settings.automationBrowserStatus !== BrowserStatus.OK) {
-        addLog(LogLevel.ERROR, "Navegador de automação não está pronto. Verifique as configurações.");
-        alert("Erro: O navegador de automação não está pronto. Verifique o status nas Configurações.");
-        return;
+      addLog(LogLevel.ERROR, "Navegador de automação não está pronto. Verifique as configurações.");
+      alert("Erro: O navegador de automação não está pronto. Verifique o status nas Configurações.");
+      return;
     }
 
     // Determina qual schedule usar baseado no modo ativo
@@ -391,13 +454,19 @@ const AppView: React.FC = () => {
 
     addLog(LogLevel.INFO, `Solicitando início da automação no modo: ${automationMode}`);
     if (window.electronAPI) {
-        window.electronAPI.startAutomation({
-            schedule: scheduleToUse,
-            credentials: currentUserCredentials,
-            settings
-        });
+      // Create a temporary settings object with the specific flag for the current mode resolved to a boolean
+      const effectiveSettings = {
+        ...settings,
+        preAssignedInterval: settings.preAssignedIntervalConfig?.[automationMode] || false
+      };
+
+      window.electronAPI.startAutomation({
+        schedule: scheduleToUse,
+        credentials: currentUserCredentials,
+        settings: effectiveSettings
+      });
     } else {
-        addLog(LogLevel.ERROR, "Electron API não disponível para iniciar automação.");
+      addLog(LogLevel.ERROR, "Electron API não disponível para iniciar automação.");
     }
   };
 
@@ -429,10 +498,10 @@ const AppView: React.FC = () => {
 
   const handleInterrupt = () => {
     addLog(LogLevel.INFO, "Solicitando interrupção da automação.");
-     if (window.electronAPI) {
-        window.electronAPI.stopAutomation();
+    if (window.electronAPI) {
+      window.electronAPI.stopAutomation();
     } else {
-        addLog(LogLevel.ERROR, "Electron API não disponível para interromper automação.");
+      addLog(LogLevel.ERROR, "Electron API não disponível para interromper automação.");
     }
   };
 
@@ -477,8 +546,8 @@ const AppView: React.FC = () => {
               onClick={() => handleModeChange(mode)}
               disabled={automationState.isRunning}
               className={`px-4 py-2 rounded-md text-sm font-medium transition-colors disabled:opacity-60
-                ${automationMode === mode 
-                  ? 'bg-primary-600 text-white shadow-md' 
+                ${automationMode === mode
+                  ? 'bg-primary-600 text-white shadow-md'
                   : 'bg-secondary-200 hover:bg-secondary-300 dark:bg-secondary-700 dark:hover:bg-secondary-600 text-secondary-800 dark:text-secondary-200'}`}
             >
               {mode === AutomationMode.WEEKLY_MANUAL && <i className="fas fa-edit mr-2"></i>}
@@ -488,7 +557,12 @@ const AppView: React.FC = () => {
             </button>
           ))}
         </div>
-         {automationMode === AutomationMode.WEEKLY_AUTO && (
+
+        {automationMode === AutomationMode.WEEKLY_MANUAL && (
+          renderPreAssignedIntervalToggle(AutomationMode.WEEKLY_MANUAL, false)
+        )}
+
+        {automationMode === AutomationMode.WEEKLY_AUTO && (
           <div className="mt-4 pt-4 border-t border-secondary-200 dark:border-secondary-700">
             <div className="flex items-end gap-6">
               {/* Campo de Hora Base */}
@@ -534,6 +608,7 @@ const AppView: React.FC = () => {
                   </div>
                 </label>
               </div>
+              {renderPreAssignedIntervalToggle(AutomationMode.WEEKLY_AUTO, true)}
             </div>
 
             {/* Descrições abaixo */}
@@ -547,8 +622,7 @@ const AppView: React.FC = () => {
             </div>
           </div>
         )}
-
-         {automationMode === AutomationMode.MONTHLY_AUTO && (
+        {automationMode === AutomationMode.MONTHLY_AUTO && (
           <div className="mt-4 pt-4 border-t border-secondary-200 dark:border-secondary-700">
             <div className="flex items-end gap-6">
               {/* Campo de Hora Base */}
@@ -594,6 +668,7 @@ const AppView: React.FC = () => {
                   </div>
                 </label>
               </div>
+              {renderPreAssignedIntervalToggle(AutomationMode.MONTHLY_AUTO, true)}
             </div>
 
             {/* Descrições abaixo */}
@@ -606,8 +681,9 @@ const AppView: React.FC = () => {
               </p>
             </div>
           </div>
-        )}
-      </div>
+        )
+        }
+      </div >
 
       <div className="bg-white dark:bg-secondary-800 p-4 rounded-lg shadow overflow-x-auto">
         <div className="flex items-center justify-between mb-3">
@@ -629,23 +705,24 @@ const AppView: React.FC = () => {
             monthlySchedule={monthlyAutoSchedule}
             onUpdateDay={handleUpdateMonthlyDay}
             readonly={automationState.isRunning}
+            preAssignedInterval={settings.preAssignedIntervalConfig?.[automationMode]}
           />
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-secondary-200 dark:divide-secondary-700">
-            <thead className="bg-secondary-100 dark:bg-secondary-700">
+              <thead className="bg-secondary-100 dark:bg-secondary-700">
                 <tr>
-                <th className="py-3 px-4 text-left text-xs font-medium text-secondary-500 dark:text-secondary-300 uppercase tracking-wider">Dia</th>
-                <th className="py-3 px-3 text-left text-xs font-medium text-secondary-500 dark:text-secondary-300 uppercase tracking-wider">Entrada 1</th>
-                <th className="py-3 px-3 text-left text-xs font-medium text-secondary-500 dark:text-secondary-300 uppercase tracking-wider">Saída 1</th>
-                <th className="py-3 px-3 text-left text-xs font-medium text-secondary-500 dark:text-secondary-300 uppercase tracking-wider">Entrada 2</th>
-                <th className="py-3 px-3 text-left text-xs font-medium text-secondary-500 dark:text-secondary-300 uppercase tracking-wider">Saída 2</th>
-                <th className="py-3 px-4 text-center text-xs font-medium text-secondary-500 dark:text-secondary-300 uppercase tracking-wider">Feriado</th>
+                  <th className="py-3 px-4 text-left text-xs font-medium text-secondary-500 dark:text-secondary-300 uppercase tracking-wider">Dia</th>
+                  <th className="py-3 px-3 text-left text-xs font-medium text-secondary-500 dark:text-secondary-300 uppercase tracking-wider">Entrada 1</th>
+                  <th className="py-3 px-3 text-left text-xs font-medium text-secondary-500 dark:text-secondary-300 uppercase tracking-wider">Saída 1</th>
+                  <th className="py-3 px-3 text-left text-xs font-medium text-secondary-500 dark:text-secondary-300 uppercase tracking-wider">Entrada 2</th>
+                  <th className="py-3 px-3 text-left text-xs font-medium text-secondary-500 dark:text-secondary-300 uppercase tracking-wider">Saída 2</th>
+                  <th className="py-3 px-4 text-center text-xs font-medium text-secondary-500 dark:text-secondary-300 uppercase tracking-wider">Feriado</th>
                 </tr>
-            </thead>
-            <tbody className="bg-white dark:bg-secondary-800 divide-y divide-secondary-200 dark:divide-secondary-700">
+              </thead>
+              <tbody className="bg-white dark:bg-secondary-800 divide-y divide-secondary-200 dark:divide-secondary-700">
                 {DAYS_OF_WEEK.map((day) => (
-                <DayRowEditor
+                  <DayRowEditor
                     key={day}
                     day={day}
                     entry={automationMode === AutomationMode.WEEKLY_MANUAL ? weeklyManualSchedule[day] : weeklyAutoSchedule[day]}
@@ -657,9 +734,10 @@ const AppView: React.FC = () => {
                       }
                     }}
                     readonly={automationState.isRunning || automationMode === AutomationMode.WEEKLY_AUTO}
-                />
+                    preAssignedInterval={settings.preAssignedIntervalConfig?.[automationMode]}
+                  />
                 ))}
-            </tbody>
+              </tbody>
             </table>
           </div>
         )}
@@ -667,10 +745,10 @@ const AppView: React.FC = () => {
 
       <div className="bg-white dark:bg-secondary-800 p-4 rounded-lg shadow flex flex-col sm:flex-row items-center justify-between space-y-3 sm:space-y-0 sm:space-x-3">
         <div className="text-sm text-secondary-600 dark:text-secondary-400">
-            Status: <span className={`font-semibold ${automationState.isRunning ? 'text-yellow-500 animate-pulse' : 'text-green-500'}`}>{automationState.statusMessage}</span>
-            {automationState.isRunning && automationState.currentTask && (
-                <span className="ml-2">| Tarefa: {automationState.currentTask}</span>
-            )}
+          Status: <span className={`font-semibold ${automationState.isRunning ? 'text-yellow-500 animate-pulse' : 'text-green-500'}`}>{automationState.statusMessage}</span>
+          {automationState.isRunning && automationState.currentTask && (
+            <span className="ml-2">| Tarefa: {automationState.currentTask}</span>
+          )}
         </div>
         <div className="flex flex-wrap gap-3">
           <button
@@ -697,7 +775,7 @@ const AppView: React.FC = () => {
           </button>
         </div>
       </div>
-    </div>
+    </div >
   );
 };
 

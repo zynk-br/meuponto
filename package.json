@@ -1,6 +1,6 @@
 {
   "name": "meu-ponto",
-  "version": "2.0.28",
+  "version": "2.0.31",
   "description": "Automatizador de ponto",
   "main": "./out/electron/main.js",
   "author": {
@@ -25,23 +25,23 @@
     "form-data": "^4.0.4",
     "ical-generator": "^9.0.0",
     "keytar": "^7.9.0",
-    "playwright": "^1.53.2"
+    "playwright": "^1.56.1"
   },
   "devDependencies": {
     "@electron-toolkit/preload": "^3.0.2",
-    "@types/react": "^19.1.8",
-    "@types/react-dom": "^19.1.6",
+    "@types/react": "^19.2.4",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.3.1",
-    "autoprefixer": "^10.4.19",
-    "electron": "^37.1.0",
+    "autoprefixer": "^10.4.22",
+    "electron": "^33.2.0",
     "electron-builder": "^26.0.12",
-    "electron-vite": "^3.1.0",
+    "electron-vite": "^4.0.1",
     "postcss": "^8.4.38",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
     "tailwindcss": "^3.4.4",
-    "vite": "^5.3.1"
+    "vite": "^7.2.2"
   },
   "build": {
     "appId": "com.zynk.meuponto",
@@ -66,7 +66,7 @@
       "repo": "meuponto"
     },
     "mac": {
-      "icon": "assets/build/icon.png",
+      "icon": "assets/build/icon.icns",
       "target": [
         "dmg",
         "zip"

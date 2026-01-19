@@ -5,9 +5,10 @@ interface MonthlyCalendarProps {
   monthlySchedule: MonthlySchedule;
   onUpdateDay: (date: string, entry: MonthlyDayEntry) => void;
   readonly: boolean;
+  preAssignedInterval?: boolean;
 }
 
-const MonthlyCalendar: React.FC<MonthlyCalendarProps> = ({ monthlySchedule, onUpdateDay, readonly }) => {
+const MonthlyCalendar: React.FC<MonthlyCalendarProps> = ({ monthlySchedule, onUpdateDay, readonly, preAssignedInterval }) => {
   const [currentMonth, setCurrentMonth] = useState(new Date());
 
   const getDaysInMonth = (date: Date) => {
@@ -59,20 +60,17 @@ const MonthlyCalendar: React.FC<MonthlyCalendarProps> = ({ monthlySchedule, onUp
       days.push(
         <div
           key={dateKey}
-          className={`min-h-[120px] border p-2 ${
-            isToday
+          className={`min-h-[120px] border p-2 ${isToday
               ? 'border-primary-500 dark:border-primary-400 border-2 shadow-md ring-2 ring-primary-200 dark:ring-primary-800/50'
               : 'border-gray-200 dark:border-gray-700'
-          } ${
-            isWeekend ? 'bg-gray-100 dark:bg-gray-800' : 'bg-white dark:bg-secondary-800'
-          } ${dayEntry.feriado ? 'bg-red-50 dark:bg-red-900/20' : ''}`}
+            } ${isWeekend ? 'bg-gray-100 dark:bg-gray-800' : 'bg-white dark:bg-secondary-800'
+            } ${dayEntry.feriado ? 'bg-red-50 dark:bg-red-900/20' : ''}`}
         >
           <div className="flex items-center justify-between mb-1">
-            <span className={`text-sm font-semibold ${
-              isToday
+            <span className={`text-sm font-semibold ${isToday
                 ? 'text-primary-600 dark:text-primary-400'
                 : isWeekend ? 'text-gray-500' : 'text-gray-700 dark:text-gray-300'
-            }`}>
+              }`}>
               {day}
             </span>
             {!isWeekend && (
@@ -99,19 +97,19 @@ const MonthlyCalendar: React.FC<MonthlyCalendarProps> = ({ monthlySchedule, onUp
               />
               <input
                 type="time"
-                value={dayEntry.saida1}
+                value={(preAssignedInterval) ? '12:00' : dayEntry.saida1}
                 onChange={(e) => onUpdateDay(dateKey, { ...dayEntry, saida1: e.target.value })}
-                disabled={readonly}
+                disabled={readonly || (preAssignedInterval === true)}
                 placeholder="S1"
-                className="w-full px-1 py-0.5 text-xs border rounded bg-white dark:bg-secondary-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 disabled:opacity-50"
+                className={`w-full px-1 py-0.5 text-xs border rounded bg-white dark:bg-secondary-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 disabled:opacity-50 ${preAssignedInterval ? 'cursor-not-allowed bg-gray-100 dark:bg-gray-800 text-gray-500' : ''}`}
               />
               <input
                 type="time"
-                value={dayEntry.entrada2}
+                value={(preAssignedInterval) ? '13:00' : dayEntry.entrada2}
                 onChange={(e) => onUpdateDay(dateKey, { ...dayEntry, entrada2: e.target.value })}
-                disabled={readonly}
+                disabled={readonly || (preAssignedInterval === true)}
                 placeholder="E2"
-                className="w-full px-1 py-0.5 text-xs border rounded bg-white dark:bg-secondary-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 disabled:opacity-50"
+                className={`w-full px-1 py-0.5 text-xs border rounded bg-white dark:bg-secondary-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 disabled:opacity-50 ${preAssignedInterval ? 'cursor-not-allowed bg-gray-100 dark:bg-gray-800 text-gray-500' : ''}`}
               />
               <input
                 type="time"

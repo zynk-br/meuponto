@@ -15,7 +15,7 @@ export interface LogEntry {
 
 export enum View {
   LOADING_PREREQUISITES = "LOADING_PREREQUISITES",
-  NODE_MISSING = "NODE_MISSING", 
+  NODE_MISSING = "NODE_MISSING",
   NODE_INSTALL = "NODE_INSTALL",
   LOGIN = "LOGIN",
   APP_VIEW = "APP_VIEW",
@@ -24,7 +24,7 @@ export enum View {
 export enum BrowserStatus {
   LOADING = "CARREGANDO",
   OK = "OK",
-  MISSING = "AUSENTE", 
+  MISSING = "AUSENTE",
 }
 
 export enum NodeStatus {
@@ -50,6 +50,7 @@ export interface Settings {
   savedFolha: string;
   detailedLogs?: boolean;
   autoRegenerateSchedules?: boolean; // Regenera horários automaticamente ao fim do ciclo (semana/mês)
+  preAssignedIntervalConfig?: Record<string, boolean>; // Configuração de pré-assinalação isolada por modo
 }
 
 export interface TimeEntry {
@@ -84,7 +85,7 @@ export enum AutomationMode {
 
 export interface AutomationState {
   isRunning: boolean;
-  statusMessage: string; 
+  statusMessage: string;
   currentTask: string | null;
 }
 
@@ -98,7 +99,7 @@ export interface ElectronAPI {
   minimizeWindow: () => void;
   maximizeWindow: () => void;
   closeWindow: () => void;
-  
+
   loadSettings: () => Promise<Partial<Settings> | undefined>;
   saveSettings: (settings: Partial<Settings>) => void;
 
@@ -110,10 +111,10 @@ export interface ElectronAPI {
   deleteCredential: (account: string) => void;
 
   checkNodeNpm: () => Promise<NodeNpmCheck>;
-  openNodeJSDownload: () => Promise<{success: boolean, message: string}>;
-  
+  openNodeJSDownload: () => Promise<{ success: boolean, message: string }>;
+
   getAppVersion: () => Promise<string>;
-  
+
   checkAutomationBrowser: () => Promise<BrowserStatus>;
   getBrowserPath: () => Promise<string>;
   reinstallAutomationBrowser: () => void;
@@ -124,7 +125,7 @@ export interface ElectronAPI {
 
   exportCalendar: (schedule: Schedule) => Promise<{ success: boolean, path?: string, error?: string }>;
 
-  onLogFromMain: (callback: (logEntry: {level: LogLevel, message: string}) => void) => () => void;
+  onLogFromMain: (callback: (logEntry: { level: LogLevel, message: string }) => void) => () => void;
   onAutomationStatusUpdate: (callback: (statusUpdate: AutomationState) => void) => () => void;
 
   // Novas funções de atualização
