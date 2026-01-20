@@ -8,6 +8,7 @@ const { expect } = require('playwright/test');
 const { autoUpdater } = require('electron-updater');
 const { exec, fork, execSync, spawn } = require('child_process');
 const util = require('util');
+const https = require('https');
 
 const execPromise = util.promisify(exec);
 const LOCAL_BROWSERS_PATH = path.join(app.getPath('userData'), 'playwright-browsers');
