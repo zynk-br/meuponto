@@ -2353,6 +2353,13 @@ app.whenReady().then(() => {
   // Queremos controle total da UI.
   autoUpdater.checkForUpdates();
 
+  // Verificação periódica de atualizações a cada 30 minutos (similar ao Discord)
+  const UPDATE_CHECK_INTERVAL = 30 * 60 * 1000; // 30 minutos
+  setInterval(() => {
+    logToRenderer('DEBUG', 'Verificando atualizações em segundo plano...');
+    autoUpdater.checkForUpdates();
+  }, UPDATE_CHECK_INTERVAL);
+
   // Adicione um log para o updater
   autoUpdater.logger = {
     info: (msg) => logToRenderer('INFO', `[Updater] ${msg}`),
