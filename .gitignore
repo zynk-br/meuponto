@@ -11,11 +11,18 @@ node_modules
 dist
 dist-ssr
 *.local
+
+# Electron (legacy)
 out
 release
 certificate.p12
 build-mac.sh
 build-win.sh
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

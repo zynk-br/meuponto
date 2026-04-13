@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicegui/tauri-v2-releases/main/v2-permissions-schema.json",
+  "identifier": "default",
+  "description": "Default capabilities for Meu Ponto",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "store:default",
+    "dialog:default",
+    "shell:default",
+    "notification:default",
+    "updater:default"
+  ]
+}
