@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
-use tauri::Emitter;
+use tauri::{AppHandle, Emitter, Manager};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
+use crate::automation::scheduler::{AutomationManager, AutomationConfig};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -16,33 +20,56 @@ pub struct UserCredentials {
     pub senha: Option<String>,
 }
 
+/// Managed state for the automation manager
+pub struct AutomationManagerState(pub Arc<Mutex<AutomationManager>>);
+
 #[tauri::command]
 pub async fn start_automation(
-    app: tauri::AppHandle,
+    app: AppHandle,
+    state: tauri::State<'_, AutomationManagerState>,
     data: AutomationRequest,
 ) -> Result<(), String> {
-    // TODO: Fase 5+6 — implementar motor de automação com chromiumoxide
-    // 1. Verificar/baixar Chromium
-    // 2. Lançar browser headless
-    // 3. Login no portal
-    // 4. Sincronizar pontos existentes
-    // 5. Calcular próxima batida (com ancoragem)
-    // 6. Agendar heartbeat loop
-    log::info!("Automação solicitada — implementação pendente (Fase 5+6)");
-    app.emit("log", serde_json::json!({
-        "level": "INFO",
-        "message": "Automação iniciada (stub — implementação pendente)."
-    })).map_err(|e| e.to_string())?;
-    Ok(())
+    let mut manager = state.0.lock().await;
+
+    if manager.is_running().await {
+        return Err("Automação já está rodando.".to_string());
+    }
+
+    let senha = data.credentials.senha.unwrap_or_default();
+    if senha.is_empty() {
+        return Err("Senha não fornecida.".to_string());
+    }
+
+    let config = AutomationConfig {
+        schedule: data.schedule,
+        folha: data.credentials.folha,
+        senha,
+        telegram_bot_token: data.settings.get("telegramBotToken")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        telegram_chat_id: data.settings.get("telegramChatId")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        pre_assigned_interval: data.settings.get("preAssignedInterval")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+    };
+
+    manager.start(app, config).await
 }
 
 #[tauri::command]
-pub async fn stop_automation(app: tauri::AppHandle) -> Result<(), String> {
-    // TODO: Fase 6 — cancelar via CancellationToken
-    log::info!("Parada da automação solicitada");
-    app.emit("log", serde_json::json!({
+pub async fn stop_automation(
+    app: AppHandle,
+    state: tauri::State<'_, AutomationManagerState>,
+) -> Result<(), String> {
+    let manager = state.0.lock().await;
+    manager.stop().await;
+
+    let _ = app.emit("log", serde_json::json!({
         "level": "INFO",
-        "message": "Automação interrompida (stub)."
-    })).map_err(|e| e.to_string())?;
+        "message": "Automação interrompida pelo usuário."
+    }));
+
     Ok(())
 }

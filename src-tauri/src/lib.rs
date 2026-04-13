@@ -5,6 +5,9 @@ mod storage;
 mod utils;
 
 use commands::{settings, credentials, calendar};
+use commands::automation as automation_cmd;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -13,6 +16,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
+        .manage(automation_cmd::AutomationManagerState(
+            Arc::new(Mutex::new(automation::scheduler::AutomationManager::new()))
+        ))
         .invoke_handler(tauri::generate_handler![
             // Settings
             settings::load_settings,
@@ -26,14 +32,12 @@ pub fn run() {
             // App info
             commands::get_app_version,
             // Automation
-            commands::automation::start_automation,
-            commands::automation::stop_automation,
+            automation_cmd::start_automation,
+            automation_cmd::stop_automation,
             // Calendar
             calendar::export_calendar,
         ])
         .setup(|_app| {
-            // TODO: Fase 9 — configurar updater
-            // TODO: Fase 5 — verificar/baixar Chromium no primeiro uso
             log::info!("Meu Ponto v3 iniciado com sucesso.");
             Ok(())
         })
