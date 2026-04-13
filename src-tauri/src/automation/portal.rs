@@ -19,103 +19,127 @@ pub async fn login_to_portal(
     emit_log(app, "INFO", &format!("Realizando login na folha: {folha}"));
 
     let page = browser
-        .new_page("about:blank")
+        .new_page(PORTAL_URL)
         .await
-        .map_err(|e| format!("Erro ao criar página: {e}"))?;
+        .map_err(|e| format!("Erro ao navegar para o portal: {e}"))?;
 
-    // Navigate to the portal
-    page.goto(PORTAL_URL)
-        .await
-        .map_err(|e| format!("Erro ao navegar: {e}"))?;
-
-    // Wait for the page to load
-    sleep(Duration::from_secs(3)).await;
-
-    // Fill login form
-    page.find_element("#login-numero-folha")
-        .await
-        .map_err(|e| format!("Campo 'número da folha' não encontrado: {e}"))?
-        .click()
-        .await
-        .map_err(|e| format!("Erro ao clicar campo folha: {e}"))?;
-
-    page.find_element("#login-numero-folha")
-        .await
-        .map_err(|e| format!("Campo folha não encontrado: {e}"))?
-        .type_str(folha)
-        .await
-        .map_err(|e| format!("Erro ao preencher folha: {e}"))?;
-
-    page.find_element("#login-senha")
-        .await
-        .map_err(|e| format!("Campo 'senha' não encontrado: {e}"))?
-        .click()
-        .await
-        .map_err(|e| format!("Erro ao clicar campo senha: {e}"))?;
-
-    page.find_element("#login-senha")
-        .await
-        .map_err(|e| format!("Campo senha não encontrado: {e}"))?
-        .type_str(senha)
-        .await
-        .map_err(|e| format!("Erro ao preencher senha: {e}"))?;
-
-    // Click login button
-    page.find_element("#login-entrar")
-        .await
-        .map_err(|e| format!("Botão 'Entrar' não encontrado: {e}"))?
-        .click()
-        .await
-        .map_err(|e| format!("Erro ao clicar 'Entrar': {e}"))?;
-
-    // Wait for navigation
+    // Wait for the page to fully load
     sleep(Duration::from_secs(5)).await;
 
-    // Click on "Incluir Ponto" menu
-    page.find_element("#menu-incluir-ponto")
+    // Fill login form using JavaScript (more reliable than type_str for SPAs)
+    let fill_result: String = page
+        .evaluate(format!(
+            r#"
+            (() => {{
+                const folhaInput = document.querySelector('#login-numero-folha');
+                const senhaInput = document.querySelector('#login-senha');
+                const loginBtn = document.querySelector('#login-entrar');
+
+                if (!folhaInput) return 'ERRO:Campo folha não encontrado';
+                if (!senhaInput) return 'ERRO:Campo senha não encontrado';
+                if (!loginBtn) return 'ERRO:Botão login não encontrado';
+
+                // Set values using native input setter (works with React/Angular SPAs)
+                const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                    window.HTMLInputElement.prototype, 'value'
+                ).set;
+
+                nativeInputValueSetter.call(folhaInput, '{folha}');
+                folhaInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
+
+                nativeInputValueSetter.call(senhaInput, '{senha}');
+                senhaInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
+
+                loginBtn.click();
+                return 'OK';
+            }})()
+            "#
+        ).as_str())
         .await
-        .map_err(|e| format!("Menu 'Incluir Ponto' não encontrado: {e}"))?
-        .click()
-        .await
-        .map_err(|e| format!("Erro ao clicar 'Incluir Ponto': {e}"))?;
+        .map_err(|e| format!("Erro ao executar JS de login: {e}"))?
+        .into_value()
+        .map_err(|e| format!("Erro ao converter resultado: {e}"))?;
 
-    // Wait for the punch page to load
-    sleep(Duration::from_secs(3)).await;
-
-    // Verify we're on the correct page
-    let url = page.url().await.map_err(|e| format!("Erro ao obter URL: {e}"))?;
-    let url_str = url.map(|u| u.to_string()).unwrap_or_default();
-
-    if !url_str.contains("incluir-ponto") {
-        // Try to verify via page content
-        let content_check: Result<String, _> = page
-            .evaluate(
-                r#"
-                const el = document.querySelector('#localizacao-incluir-ponto');
-                el ? el.textContent.trim() : '';
-            "#,
-            )
-            .await
-            .map_err(|e| format!("Erro ao verificar página: {e}"))
-            .and_then(|val| {
-                val.into_value::<String>()
-                    .map_err(|e| format!("Erro ao converter valor: {e}"))
-            });
-
-        match content_check {
-            Ok(text) if text.contains("Incluir Ponto") => {
-                emit_log(app, "SUCESSO", "Logado com sucesso.");
-            }
-            _ => {
-                // Take screenshot for debugging
-                let _ = take_error_screenshot(&page, app, "login").await;
-                return Err("Falha no login: o painel não respondeu.".to_string());
-            }
-        }
-    } else {
-        emit_log(app, "SUCESSO", "Logado com sucesso.");
+    if fill_result.starts_with("ERRO:") {
+        let _ = take_error_screenshot(&page, app, "login_fields").await;
+        return Err(fill_result);
     }
 
+    emit_log(app, "DEBUG", "Formulário preenchido, aguardando navegação...");
+
+    // Wait for navigation after login
+    sleep(Duration::from_secs(8)).await;
+
+    // Try to click "Incluir Ponto" menu — poll for up to 15 seconds
+    let mut menu_found = false;
+    for attempt in 1..=5 {
+        let click_result: String = page
+            .evaluate(
+                r#"
+                (() => {
+                    const menu = document.querySelector('#menu-incluir-ponto');
+                    if (menu) {
+                        menu.click();
+                        return 'OK';
+                    }
+                    return 'NOT_FOUND';
+                })()
+                "#,
+            )
+            .await
+            .map_err(|e| format!("Erro ao buscar menu: {e}"))?
+            .into_value()
+            .map_err(|e| format!("Erro ao converter: {e}"))?;
+
+        if click_result == "OK" {
+            menu_found = true;
+            emit_log(app, "DEBUG", "Menu 'Incluir Ponto' clicado.");
+            break;
+        }
+
+        emit_log(
+            app,
+            "DEBUG",
+            &format!("Menu não encontrado, tentativa {attempt}/5..."),
+        );
+        sleep(Duration::from_secs(3)).await;
+    }
+
+    if !menu_found {
+        let _ = take_error_screenshot(&page, app, "login_menu").await;
+        return Err("Menu 'Incluir Ponto' não encontrado após login. Verifique credenciais.".to_string());
+    }
+
+    // Wait for the punch page to load
+    sleep(Duration::from_secs(5)).await;
+
+    // Verify we're on the correct page
+    let page_check: String = page
+        .evaluate(
+            r#"
+            (() => {
+                const loc = document.querySelector('#localizacao-incluir-ponto');
+                if (loc && loc.textContent.includes('Incluir Ponto')) return 'OK';
+                // Fallback: check URL
+                if (window.location.href.includes('incluir-ponto')) return 'OK';
+                return 'FAIL:' + window.location.href;
+            })()
+            "#,
+        )
+        .await
+        .map_err(|e| format!("Erro na verificação pós-login: {e}"))?
+        .into_value()
+        .map_err(|e| format!("Erro ao converter: {e}"))?;
+
+    if page_check.starts_with("FAIL:") {
+        let _ = take_error_screenshot(&page, app, "login_verify").await;
+        return Err(format!(
+            "Falha no login: página não é 'Incluir Ponto'. URL: {}",
+            &page_check[5..]
+        ));
+    }
+
+    emit_log(app, "SUCESSO", "Logado com sucesso.");
     Ok(page)
 }
 
@@ -126,71 +150,147 @@ pub async fn sync_initial_points(
 ) -> Result<Vec<String>, String> {
     emit_log(app, "INFO", "Sincronizando pontos iniciais...");
 
-    // Wait a moment for the page to be ready
-    sleep(Duration::from_millis(1000)).await;
-
-    // Get today's date string in DD/MM format
     let today = chrono::Local::now();
     let today_str = today.format("%d/%m").to_string();
 
-    // Execute JavaScript to scrape existing punch entries
-    let js = format!(
-        r#"
-        (() => {{
-            const statusSelector = '[id^="status-processamento-"]';
-            const elements = document.querySelectorAll(statusSelector);
-            const entries = [];
+    // Retry up to 3 times with increasing wait, because the SPA may load data async
+    for attempt in 1..=3 {
+        // Wait for data to render
+        let wait_ms = match attempt {
+            1 => 3000,
+            2 => 5000,
+            _ => 8000,
+        };
+        sleep(Duration::from_millis(wait_ms)).await;
 
-            elements.forEach(statusEl => {{
-                const timeElement = statusEl.previousElementSibling;
-                if (timeElement && timeElement.textContent) {{
-                    const fullText = timeElement.textContent.trim();
-                    const dateMatch = fullText.match(/\d{{2}}\/\d{{2}}/);
-                    const timeMatch = fullText.match(/\d{{2}}:\d{{2}}/);
-                    if (dateMatch && timeMatch) {{
-                        entries.push({{ date: dateMatch[0], time: timeMatch[0] }});
-                    }}
+        // First, debug: check what selectors exist on the page
+        let debug_info: String = page
+            .evaluate(
+                r#"
+                (() => {
+                    const statusEls = document.querySelectorAll('[id^="status-processamento-"]');
+                    const allTextEls = document.querySelectorAll('.registro-ponto, .ponto-item, [class*="ponto"], [class*="registro"]');
+
+                    // Broader search: look for any element containing date/time patterns
+                    const body = document.body ? document.body.innerText.substring(0, 2000) : 'NO BODY';
+
+                    return JSON.stringify({
+                        statusCount: statusEls.length,
+                        classMatchCount: allTextEls.length,
+                        bodyPreview: body.substring(0, 500),
+                        url: window.location.href
+                    });
+                })()
+                "#,
+            )
+            .await
+            .map_err(|e| format!("Erro debug JS: {e}"))?
+            .into_value()
+            .map_err(|e| format!("Erro converter debug: {e}"))?;
+
+        emit_log(app, "DEBUG", &format!("Tentativa {attempt} - DOM debug: {debug_info}"));
+
+        // Try the original selector approach, handling both pt-BR (DD/MM 24h) and en-US (MM/DD 12h) formats
+        let js = format!(
+            r#"
+            (() => {{
+                const todayDD_MM = "{}";
+                const parts = todayDD_MM.split('/');
+                const todayMM_DD = parts[1] + '/' + parts[0]; // flip to MM/DD for en-US
+
+                function parse12hTo24h(timeStr) {{
+                    // Convert "7:52 AM" or "3:09 PM" to "07:52" or "15:09"
+                    const match = timeStr.match(/(\d{{1,2}}):(\d{{2}})\s*(AM|PM)/i);
+                    if (!match) return null;
+                    let h = parseInt(match[1]);
+                    const m = match[2];
+                    const ampm = match[3].toUpperCase();
+                    if (ampm === 'PM' && h !== 12) h += 12;
+                    if (ampm === 'AM' && h === 12) h = 0;
+                    return String(h).padStart(2, '0') + ':' + m;
                 }}
-            }});
 
-            // Filter for today only
-            const todayStr = "{}";
-            const todayPunches = entries
-                .filter(e => e.date === todayStr)
-                .map(e => e.time)
-                .sort();
+                const entries = [];
 
-            return JSON.stringify(todayPunches);
-        }})()
-    "#,
-        today_str
-    );
+                const statusEls = document.querySelectorAll('[id^="status-processamento-"]');
+                statusEls.forEach(statusEl => {{
+                    const timeElement = statusEl.previousElementSibling;
+                    if (!timeElement || !timeElement.textContent) return;
+                    const fullText = timeElement.textContent.trim();
 
-    let result: String = page
-        .evaluate(js.as_str())
-        .await
-        .map_err(|e| format!("Erro ao executar JS: {e}"))?
-        .into_value()
-        .map_err(|e| format!("Erro ao converter resultado: {e}"))?;
+                    // Try pt-BR format: "13/04 - 07:52"
+                    const ptMatch = fullText.match(/(\d{{2}}\/\d{{2}})\s*-\s*(\d{{2}}:\d{{2}})/);
+                    if (ptMatch) {{
+                        entries.push({{ date: ptMatch[1], time: ptMatch[2], format: 'pt' }});
+                        return;
+                    }}
 
-    let punches: Vec<String> =
-        serde_json::from_str(&result).unwrap_or_default();
+                    // Try en-US format: "04/13 - 7:52 AM"
+                    const enMatch = fullText.match(/(\d{{2}}\/\d{{2}})\s*-\s*(\d{{1,2}}:\d{{2}}\s*[APap][Mm])/);
+                    if (enMatch) {{
+                        const converted = parse12hTo24h(enMatch[2]);
+                        if (converted) {{
+                            // Convert MM/DD to DD/MM
+                            const mParts = enMatch[1].split('/');
+                            const ddmm = mParts[1] + '/' + mParts[0];
+                            entries.push({{ date: ddmm, time: converted, format: 'en' }});
+                        }}
+                        return;
+                    }}
+                }});
 
-    emit_log(
-        app,
-        "INFO",
-        &format!(
-            "Pontos encontrados para HOJE ({}): {}",
-            today_str,
-            if punches.is_empty() {
-                "Nenhum".to_string()
-            } else {
-                punches.join(", ")
-            }
-        ),
-    );
+                const todayPunches = entries
+                    .filter(e => e.date === todayDD_MM)
+                    .map(e => e.time)
+                    .sort();
 
-    Ok(punches)
+                return JSON.stringify({{ found: todayPunches, totalEntries: entries.length }});
+            }})()
+        "#,
+            today_str
+        );
+
+        let result: String = page
+            .evaluate(js.as_str())
+            .await
+            .map_err(|e| format!("Erro ao executar JS: {e}"))?
+            .into_value()
+            .map_err(|e| format!("Erro ao converter resultado: {e}"))?;
+
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap_or_default();
+        let punches: Vec<String> = parsed
+            .get("found")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+        let total_entries = parsed.get("totalEntries").and_then(|v| v.as_i64()).unwrap_or(0);
+
+        emit_log(
+            app,
+            "DEBUG",
+            &format!("Tentativa {attempt}: {total_entries} entradas totais, {} de hoje", punches.len()),
+        );
+
+        if !punches.is_empty() || attempt == 3 {
+            emit_log(
+                app,
+                "INFO",
+                &format!(
+                    "Pontos encontrados para HOJE ({}): {}",
+                    today_str,
+                    if punches.is_empty() {
+                        "Nenhum".to_string()
+                    } else {
+                        punches.join(", ")
+                    }
+                ),
+            );
+            return Ok(punches);
+        }
+
+        emit_log(app, "DEBUG", &format!("Nenhum ponto encontrado na tentativa {attempt}, aguardando..."));
+    }
+
+    Ok(vec![])
 }
 
 /// Perform a punch (click the button to register attendance)
@@ -212,20 +312,30 @@ pub async fn perform_punch(
         emit_log(
             app,
             "AVISO",
-            &format!(
-                "Ponto {punch_type} às {punch_time} JÁ ESTÁ REGISTRADO. Pulando."
-            ),
+            &format!("Ponto {punch_type} às {punch_time} JÁ ESTÁ REGISTRADO. Pulando."),
         );
         return Ok(());
     }
 
     // Click the punch button
-    page.find_element("#localizacao-incluir-ponto")
+    let click_result: String = page
+        .evaluate(
+            r#"
+            (() => {
+                const btn = document.querySelector('#localizacao-incluir-ponto');
+                if (btn) { btn.click(); return 'OK'; }
+                return 'NOT_FOUND';
+            })()
+            "#,
+        )
         .await
-        .map_err(|e| format!("Botão de ponto não encontrado: {e}"))?
-        .click()
-        .await
-        .map_err(|e| format!("Erro ao clicar botão de ponto: {e}"))?;
+        .map_err(|e| format!("Erro ao clicar botão de ponto: {e}"))?
+        .into_value()
+        .map_err(|e| format!("Erro: {e}"))?;
+
+    if click_result != "OK" {
+        return Err("Botão de ponto não encontrado na página.".to_string());
+    }
 
     emit_log(app, "DEBUG", "Clique para registrar o ponto efetuado. Verificando...");
 
@@ -250,25 +360,19 @@ pub async fn perform_punch(
             emit_log(
                 app,
                 "SUCESSO",
-                &format!(
-                    "Ponto {punch_type} ({punch_time}) registrado e VERIFICADO com sucesso."
-                ),
+                &format!("Ponto {punch_type} ({punch_time}) registrado e VERIFICADO com sucesso."),
             );
             return Ok(());
         }
 
-        // Method 2: count increased with nearby time
+        // Method 2: count increased
         if updated_points.len() > previous_count {
-            if time_exists_with_tolerance(&updated_points, punch_time, 5) {
-                emit_log(
-                    app,
-                    "SUCESSO",
-                    &format!(
-                        "Ponto {punch_type} ({punch_time}) verificado por contagem + proximidade."
-                    ),
-                );
-                return Ok(());
-            }
+            emit_log(
+                app,
+                "SUCESSO",
+                &format!("Ponto {punch_type} ({punch_time}) verificado por aumento na contagem."),
+            );
+            return Ok(());
         }
     }
 
@@ -332,11 +436,7 @@ async fn take_error_screenshot(
     .await
     .map_err(|e| format!("Erro ao tirar screenshot: {e}"))?;
 
-    emit_log(
-        app,
-        "DEBUG",
-        &format!("Screenshot salvo: {filename}"),
-    );
+    emit_log(app, "DEBUG", &format!("Screenshot salvo: {filename}"));
 
     // Clean up old screenshots (>7 days)
     cleanup_old_screenshots(&screenshots_dir).await;

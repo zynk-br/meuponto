@@ -8,22 +8,13 @@ const LoadingView: React.FC = () => {
 
   useEffect(() => {
     addLog(LogLevel.INFO, "Iniciando MeuPonto...");
+    setStatusMessage("Pré-requisitos atendidos. Carregando tela de login...");
 
-    const initialize = async () => {
-      setStatusMessage("Verificando configurações...");
+    const timer = setTimeout(() => {
+      setCurrentView(View.LOGIN);
+    }, 1000);
 
-      // TODO: Fase 5 — verificar se Chromium está disponível
-      // Por enquanto, pula direto para o login
-      setStatusMessage("Pré-requisitos atendidos. Carregando tela de login...");
-
-      const timer = setTimeout(() => {
-        setCurrentView(View.LOGIN);
-      }, 1000);
-
-      return () => clearTimeout(timer);
-    };
-
-    initialize();
+    return () => clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -540,6 +540,36 @@ const AppView: React.FC = () => {
     }
   };
 
+  const [isTesting, setIsTesting] = useState(false);
+  const [testResults, setTestResults] = useState<string[] | null>(null);
+
+  const handleTestSync = async () => {
+    if (!currentUserCredentials?.folha || !currentUserCredentials?.senha) {
+      addLog(LogLevel.ERROR, "Credenciais não disponíveis. Faça login primeiro.");
+      return;
+    }
+    setIsTesting(true);
+    setTestResults(null);
+    addLog(LogLevel.INFO, "Iniciando teste de sincronização (somente leitura)...");
+
+    try {
+      const points = await tauriAPI.testSyncPoints(
+        currentUserCredentials.folha,
+        currentUserCredentials.senha
+      );
+      setTestResults(points);
+      if (points.length > 0) {
+        addLog(LogLevel.SUCCESS, `Teste concluído: ${points.length} ponto(s) hoje → ${points.join(', ')}`);
+      } else {
+        addLog(LogLevel.INFO, "Teste concluído: nenhum ponto registrado hoje.");
+      }
+    } catch (error) {
+      addLog(LogLevel.ERROR, `Teste falhou: ${error}`);
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
   return (
     <div className="p-6 space-y-6 bg-secondary-50 bg-gradient-to-br from-primary-500 to-primary-700 dark:from-primary-700 dark:to-primary-900 flex-grow overflow-y-auto">
       <div className="bg-white dark:bg-secondary-800 p-4 rounded-lg shadow">
@@ -778,8 +808,48 @@ const AppView: React.FC = () => {
           >
             <i className="fas fa-stop mr-2"></i> Interromper
           </button>
+          <button
+            onClick={handleTestSync}
+            disabled={automationState.isRunning || isTesting}
+            title="Teste seguro: apenas lê os pontos de hoje, sem registrar nada"
+            className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 flex items-center"
+          >
+            {isTesting ? (
+              <><i className="fas fa-spinner fa-spin mr-2"></i> Testando...</>
+            ) : (
+              <><i className="fas fa-search mr-2"></i> Testar Sync</>
+            )}
+          </button>
         </div>
       </div>
+
+      {testResults !== null && (
+        <div className="bg-white dark:bg-secondary-800 p-4 rounded-lg shadow">
+          <h3 className="text-lg font-semibold text-primary-700 dark:text-primary-300 mb-2">
+            <i className="fas fa-clipboard-check mr-2"></i>
+            Resultado do Teste (somente leitura)
+          </h3>
+          {testResults.length > 0 ? (
+            <div className="space-y-2">
+              <p className="text-sm text-secondary-600 dark:text-secondary-300">
+                {testResults.length} ponto(s) registrado(s) hoje:
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {testResults.map((time, i) => (
+                  <span key={i} className="px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-sm font-mono font-medium">
+                    {time}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-secondary-500 dark:text-secondary-400">
+              Nenhum ponto registrado hoje.
+            </p>
+          )}
+        </div>
+      )}
+
       <ConfirmDialog
         isOpen={showClearConfirm}
         title="Limpar Grade"

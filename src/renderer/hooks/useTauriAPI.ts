@@ -72,6 +72,15 @@ export async function exportCalendar(
   return invoke('export_calendar', { schedule });
 }
 
+// ---- Test (somente leitura) ----
+
+export async function testSyncPoints(
+  folha: string,
+  senha: string
+): Promise<string[]> {
+  return invoke<string[]>('test_sync_points', { folha, senha });
+}
+
 // ---- Update (stub — Fase 9) ----
 
 export async function downloadUpdate(): Promise<void> {

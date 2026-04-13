@@ -1,4 +1,4 @@
-import React, { createContext, useState, useCallback, ReactNode, useEffect } from 'react';
+import React, { createContext, useState, useCallback, useRef, ReactNode, useEffect } from 'react';
 import { LogEntry, View, Settings, LogLevel, Schedule, AutomationMode, AutomationState, UserCredentials } from '../types';
 import { INITIAL_SETTINGS, INITIAL_VIEW, INITIAL_SCHEDULE, INITIAL_AUTOMATION_MODE, MAX_LOG_ENTRIES } from '../constants';
 import * as tauriAPI from '../hooks/useTauriAPI';
@@ -76,8 +76,12 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     });
   }, []);
 
+  // Initialization: load settings + schedule (run once, guarded by ref)
+  const initRan = useRef(false);
   useEffect(() => {
-    // Load settings from store
+    if (initRan.current) return;
+    initRan.current = true;
+
     tauriAPI.loadSettings().then(storedSettings => {
       if (storedSettings) {
         addLogCallback(LogLevel.INFO, "Configurações carregadas do armazenamento.");
@@ -92,7 +96,6 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       addLogCallback(LogLevel.ERROR, `Erro ao carregar settings: ${err}`);
     });
 
-    // Load schedule from store
     tauriAPI.loadSchedule().then(storedSchedule => {
       if (storedSchedule) {
         addLogCallback(LogLevel.INFO, "Grade de horários carregada do armazenamento.");
@@ -101,20 +104,29 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     }).catch(err => {
       addLogCallback(LogLevel.ERROR, `Erro ao carregar schedule: ${err}`);
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-    // Listen for log events from Rust backend
+  // Event listeners: must properly cleanup on StrictMode remount
+  useEffect(() => {
+    let aborted = false;
     let unlistenLog: (() => void) | null = null;
     let unlistenStatus: (() => void) | null = null;
 
     tauriAPI.onLogFromMain(({ level, message }) => {
-      addLogCallback(level, message, true);
-    }).then(fn => { unlistenLog = fn; });
+      if (!aborted) addLogCallback(level, message, true);
+    }).then(fn => {
+      if (aborted) { fn(); } else { unlistenLog = fn; }
+    });
 
     tauriAPI.onAutomationStatusUpdate((statusUpdate) => {
-      setAutomationStateInternal(prev => ({ ...prev, ...statusUpdate }));
-    }).then(fn => { unlistenStatus = fn; });
+      if (!aborted) setAutomationStateInternal(prev => ({ ...prev, ...statusUpdate }));
+    }).then(fn => {
+      if (aborted) { fn(); } else { unlistenStatus = fn; }
+    });
 
     return () => {
+      aborted = true;
       unlistenLog?.();
       unlistenStatus?.();
     };

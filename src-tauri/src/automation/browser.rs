@@ -283,6 +283,8 @@ pub async fn launch_browser(executable_path: PathBuf) -> Result<(Browser, tokio:
         .arg("--disable-setuid-sandbox")
         .arg("--disable-gpu")
         .arg("--disable-dev-shm-usage")
+        .arg("--lang=pt-BR")
+        .arg("--accept-lang=pt-BR")
         .build()
         .map_err(|e| format!("Erro na configuração do browser: {e}"))?;
 

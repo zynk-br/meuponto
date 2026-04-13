@@ -36,6 +36,8 @@ pub fn run() {
             automation_cmd::stop_automation,
             // Calendar
             calendar::export_calendar,
+            // Test
+            commands::test_sync_points,
         ])
         .setup(|_app| {
             log::info!("Meu Ponto v3 iniciado com sucesso.");
