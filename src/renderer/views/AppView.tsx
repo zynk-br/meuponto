@@ -438,6 +438,31 @@ const AppView: React.FC = () => {
       scheduleToUse = convertMonthlyToWeeklySchedule(monthlyAutoSchedule);
     }
 
+    // Validar horários antes de iniciar (fix bug #15)
+    const preAssigned = settings.preAssignedIntervalConfig?.[automationMode] || false;
+    for (const [day, entry] of Object.entries(scheduleToUse)) {
+      if (entry.feriado || !entry.entrada1) continue;
+      const parseMin = (t: string) => {
+        const [h, m] = t.split(':').map(Number);
+        return h * 60 + m;
+      };
+      const e1 = parseMin(entry.entrada1);
+      const s2 = parseMin(entry.saida2);
+      if (!preAssigned) {
+        const s1 = parseMin(entry.saida1);
+        const e2 = parseMin(entry.entrada2);
+        if (e1 >= s1 || s1 >= e2 || e2 >= s2) {
+          addLog(LogLevel.ERROR, `Horários inválidos em ${day}: os horários devem ser E1 < S1 < E2 < S2.`);
+          return;
+        }
+      } else {
+        if (e1 >= s2) {
+          addLog(LogLevel.ERROR, `Horários inválidos em ${day}: Entrada 1 deve ser antes da Saída 2.`);
+          return;
+        }
+      }
+    }
+
     addLog(LogLevel.INFO, `Solicitando início da automação no modo: ${automationMode}`);
     const effectiveSettings = {
       ...settings,

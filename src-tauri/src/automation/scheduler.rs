@@ -8,6 +8,7 @@ use chrono::Datelike;
 use crate::automation::browser;
 use crate::automation::portal;
 use crate::utils::logging::emit_log;
+use crate::utils::power;
 use crate::utils::time;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,6 +76,7 @@ impl AutomationManager {
 
         emit_status(&app, true, "Iniciando automação...", Some("Preparando..."));
         emit_log(&app, "INFO", "--- Automação Iniciada ---");
+        power::start_power_save_blocker();
 
         // Spawn the automation loop
         tokio::spawn(async move {
@@ -85,6 +87,7 @@ impl AutomationManager {
             // Cleanup
             let mut running = is_running.lock().await;
             *running = false;
+            power::stop_power_save_blocker();
             emit_status(&app, false, "Automação interrompida.", None);
             emit_log(&app, "INFO", "--- Automação Efetivamente Parada ---");
         });

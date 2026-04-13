@@ -36,6 +36,7 @@ thiserror = "2"
 dirs = "6"
 futures = "0.3"
 zip = "2"
+open = "5"
 
 [profile.release]
 strip = true
