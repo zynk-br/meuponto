@@ -1,6 +1,6 @@
-// src/renderer/components/UpdateNotification.tsx
 import React, { useState, useEffect } from 'react';
 import { APP_TITLE } from '../constants';
+import * as tauriAPI from '../hooks/useTauriAPI';
 
 const UpdateNotification: React.FC = () => {
   const [isVisible, setIsVisible] = useState(false);
@@ -10,46 +10,41 @@ const UpdateNotification: React.FC = () => {
   const [isDownloaded, setIsDownloaded] = useState(false);
 
   useEffect(() => {
-    if (!window.electronAPI) return;
+    let unlistenAvailable: (() => void) | null = null;
+    let unlistenProgress: (() => void) | null = null;
+    let unlistenDownloaded: (() => void) | null = null;
 
-    // Listener para quando uma atualização está disponível
-    const removeUpdateAvailableListener = window.electronAPI.onUpdateAvailable((info) => {
+    tauriAPI.onUpdateAvailable((info) => {
       setUpdateInfo(info);
       setIsDownloaded(false);
       setIsDownloading(false);
       setIsVisible(true);
-    });
+    }).then(fn => { unlistenAvailable = fn; });
 
-    // Listener para o progresso do download
-    const removeUpdateProgressListener = window.electronAPI.onUpdateProgress((progress) => {
+    tauriAPI.onUpdateProgress((progress) => {
       setIsDownloading(true);
       setDownloadProgress(progress.percent);
-    });
+    }).then(fn => { unlistenProgress = fn; });
 
-    // Listener para quando o download termina
-    const removeUpdateDownloadedListener = window.electronAPI.onUpdateDownloaded(() => {
+    tauriAPI.onUpdateDownloaded(() => {
       setIsDownloading(false);
       setIsDownloaded(true);
-    });
+    }).then(fn => { unlistenDownloaded = fn; });
 
     return () => {
-      removeUpdateAvailableListener();
-      removeUpdateProgressListener();
-      removeUpdateDownloadedListener();
+      unlistenAvailable?.();
+      unlistenProgress?.();
+      unlistenDownloaded?.();
     };
   }, []);
 
   const handleDownload = () => {
-    if (window.electronAPI) {
-      window.electronAPI.downloadUpdate();
-      setIsDownloading(true);
-    }
+    tauriAPI.downloadUpdate();
+    setIsDownloading(true);
   };
 
   const handleInstall = () => {
-    if (window.electronAPI) {
-      window.electronAPI.installUpdate();
-    }
+    tauriAPI.installUpdate();
   };
 
   if (!isVisible) {

@@ -1,8 +1,8 @@
-// Arquivo agora em: src/renderer/views/LoginView.tsx
 import React, { useState, useEffect } from 'react';
-import { useAppContext } from '../hooks/useAppContext'; // Ajustado
-import { View, LogLevel } from '../types'; // Ajustado
-import { APP_TITLE, KEYTAR_ACCOUNT_PREFIX } from '../constants'; // Ajustado
+import { useAppContext } from '../hooks/useAppContext';
+import { View, LogLevel } from '../types';
+import { APP_TITLE, KEYTAR_ACCOUNT_PREFIX } from '../constants';
+import * as tauriAPI from '../hooks/useTauriAPI';
 
 const LoginView: React.FC = () => {
   const { setCurrentView, addLog, settings, updateSettings, setCurrentUserCredentials } = useAppContext();
@@ -16,15 +16,11 @@ const LoginView: React.FC = () => {
     if (settings.saveLoginDetails && settings.savedFolha) {
       setFolha(settings.savedFolha);
       setSalvarLoginDetails(true);
-      // addLog(LogLevel.DEBUG, "Preferência de login carregada."); // Evitar addLog em useEffect sem deps corretas
-      if (window.electronAPI) {
-        window.electronAPI.getCredential(`${KEYTAR_ACCOUNT_PREFIX}${settings.savedFolha}`).then(savedPassword => {
-          if (savedPassword) {
-            setSenha(savedPassword);
-            // addLog(LogLevel.DEBUG, "Senha carregada do armazenamento seguro.");
-          }
-        });
-      }
+      tauriAPI.getCredential(`${KEYTAR_ACCOUNT_PREFIX}${settings.savedFolha}`).then(savedPassword => {
+        if (savedPassword) {
+          setSenha(savedPassword);
+        }
+      }).catch(console.error);
     }
   }, [settings.saveLoginDetails, settings.savedFolha]);
 
@@ -34,49 +30,36 @@ const LoginView: React.FC = () => {
     setIsLoading(true);
     addLog(LogLevel.INFO, `Tentativa de login para folha: ${folha}. Salvar login: ${salvarLoginDetails}`);
 
-    if (!window.electronAPI) {
-        setError("Electron API não está disponível. Não é possível fazer login.");
-        addLog(LogLevel.ERROR, "Electron API não disponível para login.");
-        setIsLoading(false);
-        return;
-    }
-
-    // A automação real de login acontecerá no processo principal via Playwright
-    // Aqui, apenas validamos e passamos para a próxima view.
-    // A simulação de MOCK_LOGIN_SUCCESS pode ser removida ou simplificada
-    // se o objetivo for apenas coletar as credenciais para o main process.
-    // Para este exemplo, manteremos uma validação básica para simular o fluxo.
     if (!folha || !senha) {
-        setError("Número da folha e senha são obrigatórios.");
-        addLog(LogLevel.WARNING, "Tentativa de login com campos vazios.");
-        setIsLoading(false);
-        return;
+      setError("Número da folha e senha são obrigatórios.");
+      addLog(LogLevel.WARNING, "Tentativa de login com campos vazios.");
+      setIsLoading(false);
+      return;
     }
 
-    // A "validação" real do login agora será a tentativa de automação.
-    // Para este ponto, consideramos que as credenciais são válidas para prosseguir.
     addLog(LogLevel.SUCCESS, `Credenciais coletadas para folha: ${folha}.`);
-    setCurrentUserCredentials({folha, senha}); // Armazena no contexto para AppView usar
+    setCurrentUserCredentials({ folha, senha });
 
     updateSettings({ saveLoginDetails: salvarLoginDetails, savedFolha: salvarLoginDetails ? folha : '' });
 
-    if (salvarLoginDetails) {
-      await window.electronAPI.setCredential(`${KEYTAR_ACCOUNT_PREFIX}${folha}`, senha);
-      addLog(LogLevel.INFO, "Preferência de salvar credenciais ativada. Enviando para armazenamento seguro.");
-    } else {
-      if (settings.savedFolha === folha) { // Se estava salvo para este usuário
-         await window.electronAPI.deleteCredential(`${KEYTAR_ACCOUNT_PREFIX}${folha}`);
-         addLog(LogLevel.INFO, `Credenciais para ${folha} removidas do armazenamento seguro pois "Salvar login" foi desmarcado.`);
+    try {
+      if (salvarLoginDetails) {
+        await tauriAPI.setCredential(`${KEYTAR_ACCOUNT_PREFIX}${folha}`, senha);
+        addLog(LogLevel.INFO, "Preferência de salvar credenciais ativada. Enviando para armazenamento seguro.");
+      } else {
+        if (settings.savedFolha === folha) {
+          await tauriAPI.deleteCredential(`${KEYTAR_ACCOUNT_PREFIX}${folha}`);
+          addLog(LogLevel.INFO, `Credenciais para ${folha} removidas do armazenamento seguro pois "Salvar login" foi desmarcado.`);
+        }
       }
+    } catch (err) {
+      addLog(LogLevel.WARNING, `Erro ao gerenciar credenciais: ${err}`);
     }
-    
-    // Sucesso - avançar para a próxima tela
-    // A verdadeira validação do login ocorrerá quando a automação tentar usar as credenciais.
-    // Se falhar lá, o usuário será notificado pelos logs e status da automação.
+
     setCurrentView(View.APP_VIEW);
     setIsLoading(false);
   };
-  
+
   return (
     <div className="flex items-center justify-center p-4">
       <div className="w-full max-w-md bg-white dark:bg-secondary-800 shadow-2xl rounded-xl p-8 space-y-6 transform transition-all duration-500 ease-in-out">
@@ -119,7 +102,7 @@ const LoginView: React.FC = () => {
             <label htmlFor="senha" className="block text-sm font-medium text-secondary-700 dark:text-secondary-300">
               Senha
             </label>
-             <div className="mt-1 relative rounded-md shadow-sm">
+            <div className="mt-1 relative rounded-md shadow-sm">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <i className="fas fa-lock text-secondary-400"></i>
               </div>

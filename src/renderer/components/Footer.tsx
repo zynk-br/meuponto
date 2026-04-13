@@ -1,27 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { APP_TITLE } from '../constants';
+import * as tauriAPI from '../hooks/useTauriAPI';
 
 const Footer: React.FC = () => {
   const [appVersion, setAppVersion] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   useEffect(() => {
-    const getVersion = async () => {
-      if (window.electronAPI) {
-        try {
-          const version = await window.electronAPI.getAppVersion();
-          setAppVersion(version);
-        } catch (error) {
-          console.error('Erro ao obter versão:', error);
-          setAppVersion('Erro');
-        }
-      } else {
-        setAppVersion('N/A');
-      }
-      setIsLoading(false);
-    };
-
-    getVersion();
+    tauriAPI.getAppVersion()
+      .then(version => setAppVersion(version))
+      .catch(() => setAppVersion('Erro'))
+      .finally(() => setIsLoading(false));
   }, []);
 
   return (

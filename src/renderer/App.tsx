@@ -1,35 +1,27 @@
-// Arquivo agora em: src/renderer/App.tsx
 import React from 'react';
-import { AppProvider } from './contexts/AppContext'; // Ajustado
-import { useAppContext } from './hooks/useAppContext'; // Ajustado
+import { AppProvider } from './contexts/AppContext';
+import { useAppContext } from './hooks/useAppContext';
 
-//import CustomTitleBar from './components/CustomTitleBar'; // Ajustado
-import Header from './components/Header'; // Ajustado
-import Footer from './components/Footer'; // Componente de rodapé
-import LogConsole from './components/LogConsole'; // Ajustado
-import SettingsModal from './components/SettingsModal'; // Ajustado
-import TelegramTutorialModal from './components/TelegramTutorialModal'; // Ajustado
+import Header from './components/Header';
+import Footer from './components/Footer';
+import LogConsole from './components/LogConsole';
+import SettingsModal from './components/SettingsModal';
+import TelegramTutorialModal from './components/TelegramTutorialModal';
 import UpdateNotification from './components/UpdateNotification';
 
-import LoadingView from './views/LoadingView'; // Ajustado
-import NodeMissingView from './views/NodeMissingView'; // Ajustado
-import NodeInstallView from './views/NodeInstallView'; // Nova view para instalação do Node.js
-import LoginView from './views/LoginView'; // Ajustado
-import AppView from './views/AppView'; // Ajustado
+import LoadingView from './views/LoadingView';
+import LoginView from './views/LoginView';
+import AppView from './views/AppView';
 
-import { View } from './types'; // Ajustado
+import { View } from './types';
 
 
 const ViewRenderer: React.FC = () => {
   const { currentView } = useAppContext();
 
   switch (currentView) {
-    case View.LOADING_PREREQUISITES:
+    case View.LOADING:
       return <LoadingView />;
-    case View.NODE_MISSING:
-      return <NodeMissingView />; // This view might become obsolete or less critical with electron-vite
-    case View.NODE_INSTALL:
-      return <NodeInstallView />; // Nova view para instalação do Node.js
     case View.LOGIN:
       return <LoginView />;
     case View.APP_VIEW:
@@ -41,10 +33,9 @@ const ViewRenderer: React.FC = () => {
 
 const AppContent: React.FC = () => {
   const { settings } = useAppContext();
-  
+
   return (
     <div className={`flex flex-col h-screen overflow-hidden ${settings.theme}`}>
-      {/* <CustomTitleBar /> */}
       <Header />
       <main className="flex-grow flex flex-col overflow-hidden bg-gradient-to-br from-primary-500 to-primary-700 dark:from-primary-700 dark:to-primary-900">
         <ViewRenderer />

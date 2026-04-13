@@ -1,7 +1,7 @@
-// Arquivo agora em: src/renderer/contexts/AppContext.tsx
 import React, { createContext, useState, useCallback, ReactNode, useEffect } from 'react';
-import { LogEntry, View, Settings, LogLevel, Schedule, AutomationMode, AutomationState, UserCredentials } from '../types'; // Ajustado
-import { INITIAL_SETTINGS, INITIAL_VIEW, INITIAL_SCHEDULE, INITIAL_AUTOMATION_MODE } from '../constants'; // Ajustado
+import { LogEntry, View, Settings, LogLevel, Schedule, AutomationMode, AutomationState, UserCredentials } from '../types';
+import { INITIAL_SETTINGS, INITIAL_VIEW, INITIAL_SCHEDULE, INITIAL_AUTOMATION_MODE, MAX_LOG_ENTRIES } from '../constants';
+import * as tauriAPI from '../hooks/useTauriAPI';
 
 interface AppContextType {
   currentView: View;
@@ -51,64 +51,73 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const [isTelegramTutorialModalOpen, setIsTelegramTutorialModalOpen] = useState(false);
   const [currentUserCredentials, setCurrentUserCredentials] = useState<UserCredentials | null>(null);
 
-
   const addLogCallback = useCallback((level: LogLevel, message: string, fromMain: boolean = false) => {
     const timestamp = new Date().toLocaleTimeString('pt-BR', { hour12: false });
     const logSource = fromMain ? "[MAIN] " : "";
-    setLogs(prevLogs => [...prevLogs, { timestamp, level, message: `${logSource}${message}` }]);
+    setLogs(prevLogs => {
+      const newLogs = [...prevLogs, { timestamp, level, message: `${logSource}${message}` }];
+      // Cap logs at MAX_LOG_ENTRIES to prevent memory leaks
+      if (newLogs.length > MAX_LOG_ENTRIES) {
+        return newLogs.slice(newLogs.length - MAX_LOG_ENTRIES);
+      }
+      return newLogs;
+    });
   }, []);
 
   const updateSettingsCallback = useCallback((newSettings: Partial<Settings>, saveToStore: boolean = true) => {
     setSettingsState(prev => {
       const updated = { ...prev, ...newSettings };
-      if (saveToStore && window.electronAPI) {
-        window.electronAPI.saveSettings(updated);
+      if (saveToStore) {
+        tauriAPI.saveSettings(updated).catch(err => {
+          console.error('Erro ao salvar settings:', err);
+        });
       }
       return updated;
     });
-  }, [addLogCallback]);
+  }, []);
 
   useEffect(() => {
-    if (window.electronAPI) {
-      window.electronAPI.loadSettings().then(storedSettings => {
-        if (storedSettings) {
-          addLogCallback(LogLevel.INFO, "Configurações carregadas do armazenamento.");
-          const mergedSettings = {...INITIAL_SETTINGS, ...storedSettings};
-          setSettingsState(mergedSettings);
-          setTheme(mergedSettings.theme);
-        } else {
-          addLogCallback(LogLevel.INFO, "Nenhuma configuração armazenada encontrada, usando padrões.");
-          window.electronAPI.saveSettings(INITIAL_SETTINGS);
-        }
-      });
+    // Load settings from store
+    tauriAPI.loadSettings().then(storedSettings => {
+      if (storedSettings) {
+        addLogCallback(LogLevel.INFO, "Configurações carregadas do armazenamento.");
+        const mergedSettings = { ...INITIAL_SETTINGS, ...storedSettings };
+        setSettingsState(mergedSettings);
+        setTheme(mergedSettings.theme);
+      } else {
+        addLogCallback(LogLevel.INFO, "Nenhuma configuração armazenada encontrada, usando padrões.");
+        tauriAPI.saveSettings(INITIAL_SETTINGS).catch(console.error);
+      }
+    }).catch(err => {
+      addLogCallback(LogLevel.ERROR, `Erro ao carregar settings: ${err}`);
+    });
 
-      // Carrega schedule salvo
-      window.electronAPI.loadSchedule().then(storedSchedule => {
-        if (storedSchedule) {
-          addLogCallback(LogLevel.INFO, "Grade de horários carregada do armazenamento.");
-          setSchedule(storedSchedule);
-        }
-      });
+    // Load schedule from store
+    tauriAPI.loadSchedule().then(storedSchedule => {
+      if (storedSchedule) {
+        addLogCallback(LogLevel.INFO, "Grade de horários carregada do armazenamento.");
+        setSchedule(storedSchedule);
+      }
+    }).catch(err => {
+      addLogCallback(LogLevel.ERROR, `Erro ao carregar schedule: ${err}`);
+    });
 
-      const removeLogListener = window.electronAPI.onLogFromMain(({level, message}) => {
-        addLogCallback(level, message, true);
-      });
+    // Listen for log events from Rust backend
+    let unlistenLog: (() => void) | null = null;
+    let unlistenStatus: (() => void) | null = null;
 
-      const removeStatusListener = window.electronAPI.onAutomationStatusUpdate((statusUpdate) => {
-        setAutomationStateInternal(prev => ({...prev, ...statusUpdate}));
-      });
+    tauriAPI.onLogFromMain(({ level, message }) => {
+      addLogCallback(level, message, true);
+    }).then(fn => { unlistenLog = fn; });
 
-      const removeBrowserStatusListener = window.electronAPI.onBrowserStatusUpdate((status) => {
-        addLogCallback(LogLevel.INFO, `Status do navegador de automação atualizado para: ${status}`);
-        updateSettingsCallback({ automationBrowserStatus: status }, true);
-      });
+    tauriAPI.onAutomationStatusUpdate((statusUpdate) => {
+      setAutomationStateInternal(prev => ({ ...prev, ...statusUpdate }));
+    }).then(fn => { unlistenStatus = fn; });
 
-      return () => {
-        removeLogListener();
-        removeStatusListener();
-        removeBrowserStatusListener();
-      };
-    }
+    return () => {
+      unlistenLog?.();
+      unlistenStatus?.();
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addLogCallback]);
 
@@ -116,7 +125,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     document.documentElement.classList.remove('light', 'dark');
     document.documentElement.classList.add(theme);
   }, [theme]);
-  
+
   const clearLogsCallback = useCallback(() => {
     setLogs([]);
     addLogCallback(LogLevel.INFO, "Logs limpos.");
@@ -125,7 +134,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const toggleThemeCallback = useCallback(() => {
     setTheme(prevTheme => {
       const newTheme = prevTheme === 'light' ? 'dark' : 'light';
-      updateSettingsCallback({theme: newTheme});
+      updateSettingsCallback({ theme: newTheme });
       return newTheme;
     });
   }, [updateSettingsCallback]);
@@ -136,31 +145,24 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         ...prevSchedule,
         [day]: { ...prevSchedule[day], ...entry },
       };
-      // Salva no electron-store
-      if (window.electronAPI) {
-        window.electronAPI.saveSchedule(updatedSchedule);
-      }
+      tauriAPI.saveSchedule(updatedSchedule).catch(console.error);
       return updatedSchedule;
     });
   }, []);
 
   const updateFullScheduleCallback = useCallback((newSchedule: Schedule) => {
     setSchedule(newSchedule);
-    // Salva no electron-store
-    if (window.electronAPI) {
-      window.electronAPI.saveSchedule(newSchedule);
-    }
+    tauriAPI.saveSchedule(newSchedule).catch(console.error);
   }, []);
-  
+
   const clearScheduleCallback = useCallback(() => {
     setSchedule(INITIAL_SCHEDULE);
     addLogCallback(LogLevel.INFO, "Grade de horários limpa.");
   }, [addLogCallback]);
 
   const setAutomationStateCallback = useCallback((stateUpdate: Partial<AutomationState>) => {
-    setAutomationStateInternal(prevState => ({...prevState, ...stateUpdate}));
+    setAutomationStateInternal(prevState => ({ ...prevState, ...stateUpdate }));
   }, []);
-
 
   return (
     <AppContext.Provider value={{
