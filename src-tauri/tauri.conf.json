@@ -52,7 +52,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVCOTJBNjY0M0U3RUZDNjkKUldScC9INCtaS2FTVzR0eElON0E0YnJkQXhBQnlNS0x3WVVUNTdEN05idGZLZStiSTVRbmh2YUQK%",
       "endpoints": [
         "https://github.com/zynk-br/meuponto/releases/latest/download/latest.json"
       ]
