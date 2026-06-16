@@ -48,8 +48,13 @@ pub fn run() {
             // Test
             commands::test_sync_points,
         ])
-        .setup(|_app| {
+        .setup(|app| {
             log::info!("Meu Ponto v3 iniciado com sucesso.");
+            // Retoma a automação se ela estava ativa quando o app foi fechado.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                automation_cmd::try_resume(handle).await;
+            });
             Ok(())
         })
         .run(tauri::generate_context!())

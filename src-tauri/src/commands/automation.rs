@@ -1,9 +1,12 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_store::StoreExt;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::automation::scheduler::{AutomationManager, AutomationConfig};
+
+const STORE_FILENAME: &str = "settings.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -74,7 +77,95 @@ pub async fn start_automation(
         simulate_failure: data.simulate_failure,
     };
 
+    // Persiste contexto de retomada (apenas automação real, não simulação).
+    if !config.dry_run {
+        persist_resume_context(&app, &config);
+    }
+
     manager.start(app, config).await
+}
+
+/// Persiste o que é preciso para retomar a automação após reinício do app.
+/// A senha NÃO é persistida — fica no keyring do SO (buscada por folha).
+fn persist_resume_context(app: &AppHandle, config: &AutomationConfig) {
+    if let Ok(store) = app.store(STORE_FILENAME) {
+        store.set("automationWasRunning", serde_json::json!(true));
+        store.set(
+            "resumeConfig",
+            serde_json::json!({
+                "schedule": config.schedule,
+                "folha": config.folha,
+                "telegramBotToken": config.telegram_bot_token,
+                "telegramChatId": config.telegram_chat_id,
+                "preAssignedInterval": config.pre_assigned_interval,
+            }),
+        );
+        let _ = store.save();
+    }
+}
+
+/// Limpa a flag de retomada (parada explícita pelo usuário).
+fn clear_resume_flag(app: &AppHandle) {
+    if let Ok(store) = app.store(STORE_FILENAME) {
+        store.set("automationWasRunning", serde_json::json!(false));
+        let _ = store.save();
+    }
+}
+
+/// Retoma a automação no início do app, se ela estava ativa quando foi fechado.
+/// Reconstrói o config a partir do `resumeConfig` persistido + senha do keyring.
+/// O loop recarrega o `dayPlan` de hoje (se houver) e continua de onde parou.
+pub async fn try_resume(app: AppHandle) {
+    let store = match app.store(STORE_FILENAME) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+
+    if !store.get("automationWasRunning").and_then(|v| v.as_bool()).unwrap_or(false) {
+        return;
+    }
+    let resume = match store.get("resumeConfig") {
+        Some(v) => v,
+        None => return,
+    };
+
+    let folha = resume.get("folha").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    if folha.is_empty() {
+        return;
+    }
+
+    let senha = match crate::commands::credentials::get_credential(folha.clone()) {
+        Ok(Some(s)) if !s.is_empty() => s,
+        _ => {
+            let _ = app.emit("log", serde_json::json!({
+                "level": "AVISO",
+                "message": "Automação estava ativa, mas a senha não está salva; não foi possível retomar automaticamente."
+            }));
+            return;
+        }
+    };
+
+    let config = AutomationConfig {
+        schedule: resume.get("schedule").cloned().unwrap_or_else(|| serde_json::json!({})),
+        folha,
+        senha,
+        telegram_bot_token: resume.get("telegramBotToken").and_then(|v| v.as_str()).map(String::from),
+        telegram_chat_id: resume.get("telegramChatId").and_then(|v| v.as_str()).map(String::from),
+        pre_assigned_interval: resume.get("preAssignedInterval").and_then(|v| v.as_bool()).unwrap_or(false),
+        dry_run: false,
+        simulate_failure: None,
+    };
+
+    let state = app.state::<AutomationManagerState>();
+    let mut manager = state.0.lock().await;
+    if manager.is_running().await {
+        return;
+    }
+    let _ = app.emit("log", serde_json::json!({
+        "level": "INFO",
+        "message": "Retomando automação após reinício do app..."
+    }));
+    let _ = manager.start(app.clone(), config).await;
 }
 
 #[tauri::command]
@@ -84,6 +175,9 @@ pub async fn stop_automation(
 ) -> Result<(), String> {
     let manager = state.0.lock().await;
     manager.stop().await;
+
+    // Parada explícita: não retomar no próximo boot.
+    clear_resume_flag(&app);
 
     let _ = app.emit("log", serde_json::json!({
         "level": "INFO",
