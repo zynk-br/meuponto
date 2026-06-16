@@ -6,10 +6,19 @@ use serde::{Deserialize, Serialize};
 use chrono::Datelike;
 
 use crate::automation::browser;
+use crate::automation::day_plan::{DayPlan, PunchStatus};
 use crate::automation::portal;
+use crate::notifications::telegram;
 use crate::utils::logging::emit_log;
 use crate::utils::power;
 use crate::utils::time;
+
+/// Tentativas por batida antes de desistir e reagendar.
+const MAX_PUNCH_RETRIES: u8 = 3;
+/// Atraso (min) aplicado ao reagendar uma batida que esgotou as tentativas.
+const RESCHEDULE_DELAY_MIN: i32 = 10;
+/// Backoff quando o portal está indisponível (login/navegação falhou).
+const PORTAL_DOWN_BACKOFF_SECS: u64 = 300;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -151,16 +160,16 @@ async fn automation_heartbeat_loop(
             return Ok(());
         }
 
-        // Login and sync points
+        // --- 1. Login + sincronizar pontos do portal (fonte da verdade) ---
         emit_status(app, true, "Sincronizando pontos...", Some("Sync"));
 
-        let page = portal::login_to_portal(browser, app, &config.folha, &config.senha).await;
-        let page = match page {
+        let page = match portal::login_to_portal(browser, app, &config.folha, &config.senha).await {
             Ok(p) => p,
             Err(e) => {
-                emit_log(app, "ERRO", &format!("Falha no login: {e}"));
-                emit_log(app, "INFO", "Tentando novamente em 5 minutos...");
-                wait_or_cancel(cancel_token, std::time::Duration::from_secs(300)).await;
+                // Portal indisponível / login falhou: notifica + backoff de 5min,
+                // sem consumir tentativas de batida.
+                notify_portal_down(app, config, &e).await;
+                wait_or_cancel(cancel_token, std::time::Duration::from_secs(PORTAL_DOWN_BACKOFF_SECS)).await;
                 continue;
             }
         };
@@ -168,114 +177,259 @@ async fn automation_heartbeat_loop(
         let existing_points = portal::sync_initial_points(&page, app)
             .await
             .unwrap_or_default();
-
-        // Determine next punch
-        let next_punch = get_next_punch(&config.schedule, &existing_points, config.pre_assigned_interval);
-
-        // Close the page after sync
         let _ = page.close().await;
 
-        match next_punch {
-            None => {
-                emit_log(app, "INFO", "Nenhuma batida próxima encontrada. Verificando novamente em 30 minutos.");
-                emit_status(app, true, "Sem batidas pendentes. Aguardando...", None);
-                wait_or_cancel(cancel_token, std::time::Duration::from_secs(1800)).await;
+        // --- 2. Montar/retomar o plano-do-dia e reconciliar contra o portal ---
+        let plan_opt = load_or_build_plan(app, config, &existing_points);
+        let now_iso = chrono::Local::now().to_rfc3339();
 
-                if cancel_token.is_cancelled() {
-                    return Ok(());
-                }
+        let mut plan = match plan_opt {
+            Some(mut p) => {
+                p.reconcile(&existing_points, &now_iso);
+                let _ = p.save(app);
+                p
+            }
+            None => {
+                // Sem plano hoje (fim de semana / feriado / dia sem agenda).
+                wait_for_next_lookahead(app, config, &existing_points, cancel_token).await;
                 continue;
             }
-            Some(punch) => {
-                let now = chrono::Local::now().naive_local();
-                let time_until = punch.datetime.signed_duration_since(now);
-                let secs_until = time_until.num_seconds();
+        };
 
-                if secs_until < -10 {
-                    // Already passed
-                    emit_log(
-                        app,
-                        "AVISO",
-                        &format!("Batida {} às {} já passou. Pulando.", punch.punch_type, punch.time),
-                    );
-                    continue;
-                }
+        // Dia inválido: avisa e não registra hoje (melhoria: antes pulava em silêncio).
+        if plan.invalid {
+            let reason = plan.invalid_reason.clone().unwrap_or_default();
+            emit_log(
+                app,
+                "AVISO",
+                &format!("Dia '{}' inválido: {} Não vou registrar pontos hoje.", plan.day_key, reason),
+            );
+            wait_for_next_lookahead(app, config, &existing_points, cancel_token).await;
+            continue;
+        }
 
-                if secs_until > 10 {
-                    // Wait until punch time
-                    let wait_secs = calc_heartbeat_interval(secs_until);
-                    emit_status(
-                        app,
-                        true,
-                        &format!("Aguardando {} às {}", punch.punch_type, punch.time),
-                        None,
-                    );
-                    emit_log(
-                        app,
-                        "INFO",
-                        &format!(
-                            "Próxima verificação em {}s para {} @ {}",
-                            wait_secs, punch.punch_type, punch.time
-                        ),
-                    );
+        // --- 3. Selecionar a próxima batida acionável ---
+        let idx = match plan.next_actionable() {
+            Some(i) => i,
+            None => {
+                // Tudo registrado hoje. Aguarda a próxima (dia seguinte).
+                emit_status(app, true, "Todas as batidas de hoje registradas.", None);
+                wait_for_next_lookahead(app, config, &existing_points, cancel_token).await;
+                continue;
+            }
+        };
 
-                    wait_or_cancel(cancel_token, std::time::Duration::from_secs(wait_secs as u64)).await;
+        let punch = plan.punches[idx].clone();
+        let secs_until = match plan.datetime_for(&punch.planned_time) {
+            Some(dt) => dt
+                .signed_duration_since(chrono::Local::now().naive_local())
+                .num_seconds(),
+            None => {
+                emit_log(app, "ERRO", &format!("Horário inválido para {}: {}", punch.punch_type, punch.planned_time));
+                wait_or_cancel(cancel_token, std::time::Duration::from_secs(300)).await;
+                continue;
+            }
+        };
 
-                    if cancel_token.is_cancelled() {
-                        return Ok(());
+        // --- 4. Esperar até a hora (ou bater agora se já chegou/atrasou) ---
+        if secs_until > 10 {
+            let wait_secs = calc_heartbeat_interval(secs_until);
+            emit_status(app, true, &format!("Aguardando {} às {}", punch.punch_type, punch.planned_time), None);
+            emit_log(
+                app,
+                "INFO",
+                &format!("Próxima verificação em {}s para {} @ {}", wait_secs, punch.punch_type, punch.planned_time),
+            );
+            wait_or_cancel(cancel_token, std::time::Duration::from_secs(wait_secs as u64)).await;
+            continue; // re-sincroniza e reavalia
+        }
+
+        // Hora de bater (batida vencida e ainda pendente também cai aqui = catch-up).
+        emit_log(app, "INFO", &format!("Hora de registrar: {} às {}!", punch.punch_type, punch.planned_time));
+        emit_status(app, true, &format!("Registrando {}...", punch.punch_type), Some("Punch"));
+
+        perform_punch_with_retry(app, browser, config, &mut plan, idx, &existing_points, cancel_token).await;
+        let _ = plan.save(app);
+
+        wait_or_cancel(cancel_token, std::time::Duration::from_secs(60)).await;
+    }
+}
+
+/// Tenta registrar uma batida com até `MAX_PUNCH_RETRIES` tentativas (backoff
+/// exponencial). Em sucesso marca `Registered` e notifica. Ao esgotar: marca
+/// `Failed`, envia screenshot via Telegram e reagenda (+`RESCHEDULE_DELAY_MIN`).
+async fn perform_punch_with_retry(
+    app: &AppHandle,
+    browser: &chromiumoxide::browser::Browser,
+    config: &AutomationConfig,
+    plan: &mut DayPlan,
+    idx: usize,
+    existing_points: &[String],
+    cancel_token: &CancellationToken,
+) {
+    let punch_type = plan.punches[idx].punch_type.clone();
+    let planned = plan.punches[idx].planned_time.clone();
+    let prefix = if plan.dry_run { "[SIMULAÇÃO] " } else { "" };
+    let mut last_error = String::from("desconhecido");
+
+    for attempt in 1..=MAX_PUNCH_RETRIES {
+        if cancel_token.is_cancelled() {
+            return;
+        }
+
+        let page = match portal::login_to_portal(browser, app, &config.folha, &config.senha).await {
+            Ok(p) => p,
+            Err(e) => {
+                // Portal caiu no meio do registro: notifica + backoff, não conta tentativa.
+                notify_portal_down(app, config, &e).await;
+                wait_or_cancel(cancel_token, std::time::Duration::from_secs(PORTAL_DOWN_BACKOFF_SECS)).await;
+                continue;
+            }
+        };
+
+        plan.record_attempt(idx, None);
+        emit_log(app, "INFO", &format!("Tentativa {attempt}/{MAX_PUNCH_RETRIES} de registrar {punch_type} @ {planned}"));
+
+        let result = portal::perform_punch(&page, app, &punch_type, &planned).await;
+
+        match result {
+            Ok(()) => {
+                let _ = page.close().await;
+                plan.mark_registered(idx, &chrono::Local::now().to_rfc3339());
+                emit_log(app, "SUCESSO", &format!("{prefix}Ponto {punch_type} às {planned} registrado."));
+                notify(app, config, &format!("{prefix}✅ Ponto {punch_type} às {planned} registrado com sucesso!")).await;
+                return;
+            }
+            Err(e) => {
+                last_error = e.clone();
+                emit_log(app, "AVISO", &format!("Tentativa {attempt} falhou: {e}"));
+
+                // Última tentativa: captura a tela (com a página ainda aberta) p/ Telegram.
+                if attempt == MAX_PUNCH_RETRIES {
+                    if let Ok(path) = portal::take_error_screenshot(&page, app, &format!("punch_{punch_type}_falha")).await {
+                        notify_photo(app, config, &path, &format!("{prefix}🔴 Falha ao registrar {punch_type} às {planned}")).await;
                     }
-                    continue; // Re-sync and re-check
                 }
+                let _ = page.close().await;
 
-                // Time to punch!
-                emit_log(
-                    app,
-                    "INFO",
-                    &format!("Hora de bater o ponto: {} às {}!", punch.punch_type, punch.time),
-                );
-                emit_status(app, true, &format!("Registrando {}...", punch.punch_type), Some("Punch"));
-
-                // Open a new page for the punch
-                let punch_page = portal::login_to_portal(browser, app, &config.folha, &config.senha).await;
-
-                match punch_page {
-                    Ok(page) => {
-                        let punch_result = portal::perform_punch(&page, app, &punch.punch_type, &punch.time).await;
-
-                        match punch_result {
-                            Ok(()) => {
-                                // Notify via Telegram
-                                if let (Some(token), Some(chat_id)) = (&config.telegram_bot_token, &config.telegram_chat_id) {
-                                    if !token.is_empty() && !chat_id.is_empty() {
-                                        let msg = format!("✅ Ponto {} às {} registrado com sucesso!", punch.punch_type, punch.time);
-                                        let _ = crate::notifications::telegram::send_text(token, chat_id, &msg).await;
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                emit_log(app, "ERRO", &format!("Falha ao registrar ponto: {e}"));
-                                // Notify failure via Telegram
-                                if let (Some(token), Some(chat_id)) = (&config.telegram_bot_token, &config.telegram_chat_id) {
-                                    if !token.is_empty() && !chat_id.is_empty() {
-                                        let msg = format!("🔴 Falha ao registrar ponto {} às {}: {}", punch.punch_type, punch.time, e);
-                                        let _ = crate::notifications::telegram::send_text(token, chat_id, &msg).await;
-                                    }
-                                }
-                            }
-                        }
-
-                        let _ = page.close().await;
-                    }
-                    Err(e) => {
-                        emit_log(app, "ERRO", &format!("Falha no login para punch: {e}"));
-                    }
+                if attempt < MAX_PUNCH_RETRIES {
+                    let backoff = 2 * attempt as u64;
+                    wait_or_cancel(cancel_token, std::time::Duration::from_secs(backoff)).await;
                 }
-
-                // Wait a bit before next cycle
-                wait_or_cancel(cancel_token, std::time::Duration::from_secs(60)).await;
             }
         }
     }
+
+    // Esgotou as tentativas → falha + reagenda batidas restantes.
+    plan.mark_failed(idx, Some(last_error.clone()));
+    emit_log(
+        app,
+        "ERRO",
+        &format!("{prefix}Falha crítica após {MAX_PUNCH_RETRIES} tentativas em {punch_type}: {last_error}"),
+    );
+    notify(app, config, &format!("{prefix}🔴 Falha ao registrar ponto {punch_type} às {planned} após {MAX_PUNCH_RETRIES} tentativas: {last_error}")).await;
+
+    plan.apply_reschedule(&punch_type, RESCHEDULE_DELAY_MIN, existing_points);
+
+    // Resumo dos novos horários das batidas ainda não registradas.
+    let novos: Vec<String> = plan
+        .punches
+        .iter()
+        .filter(|p| p.status != PunchStatus::Registered)
+        .map(|p| format!("{} → {}", p.punch_type, p.planned_time))
+        .collect();
+    emit_log(app, "AVISO", &format!("{prefix}Batidas reagendadas (+{RESCHEDULE_DELAY_MIN}min): {}", novos.join(", ")));
+    notify(
+        app,
+        config,
+        &format!("{prefix}⏰ Reagendei (+{RESCHEDULE_DELAY_MIN}min). Novos horários: {}", novos.join(", ")),
+    )
+    .await;
+}
+
+/// Carrega o plano de hoje persistido (se existir e for de hoje e do mesmo modo)
+/// ou constrói um novo a partir da agenda + anchoring. `None` = sem plano hoje.
+fn load_or_build_plan(
+    app: &AppHandle,
+    config: &AutomationConfig,
+    existing_points: &[String],
+) -> Option<DayPlan> {
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+
+    if let Some(plan) = DayPlan::load(app) {
+        if plan.date == today && plan.pre_assigned_interval == config.pre_assigned_interval {
+            return Some(plan);
+        }
+    }
+
+    DayPlan::build_for_today(
+        &config.schedule,
+        existing_points,
+        config.pre_assigned_interval,
+        false,
+    )
+}
+
+/// Sem batida acionável hoje: usa o lookahead multi-dia para esperar até a
+/// próxima batida futura (ou 30min se não houver). Quando o dia virar, o plano
+/// é reconstruído no próximo ciclo.
+async fn wait_for_next_lookahead(
+    app: &AppHandle,
+    config: &AutomationConfig,
+    existing_points: &[String],
+    cancel_token: &CancellationToken,
+) {
+    match get_next_punch(&config.schedule, existing_points, config.pre_assigned_interval) {
+        Some(p) => {
+            let secs = p
+                .datetime
+                .signed_duration_since(chrono::Local::now().naive_local())
+                .num_seconds()
+                .max(5);
+            let wait_secs = calc_heartbeat_interval(secs);
+            emit_status(app, true, &format!("Próxima batida: {} {} às {}", p.day_key, p.punch_type, p.time), None);
+            wait_or_cancel(cancel_token, std::time::Duration::from_secs(wait_secs as u64)).await;
+        }
+        None => {
+            emit_log(app, "INFO", "Nenhuma batida próxima. Verificando novamente em 30 minutos.");
+            emit_status(app, true, "Sem batidas pendentes. Aguardando...", None);
+            wait_or_cancel(cancel_token, std::time::Duration::from_secs(1800)).await;
+        }
+    }
+}
+
+/// Notifica no Telegram (silencioso se token/chat_id ausentes).
+async fn notify(app: &AppHandle, config: &AutomationConfig, message: &str) {
+    if let (Some(token), Some(chat_id)) = (&config.telegram_bot_token, &config.telegram_chat_id) {
+        if !token.is_empty() && !chat_id.is_empty() {
+            if let Err(e) = telegram::send_text(token, chat_id, message).await {
+                emit_log(app, "DEBUG", &format!("Falha ao notificar no Telegram: {e}"));
+            }
+        }
+    }
+}
+
+/// Envia um screenshot no Telegram (silencioso se token/chat_id ausentes).
+async fn notify_photo(app: &AppHandle, config: &AutomationConfig, path: &std::path::Path, caption: &str) {
+    if let (Some(token), Some(chat_id)) = (&config.telegram_bot_token, &config.telegram_chat_id) {
+        if !token.is_empty() && !chat_id.is_empty() {
+            if let Err(e) = telegram::send_photo(token, chat_id, path, caption).await {
+                emit_log(app, "DEBUG", &format!("Falha ao enviar screenshot no Telegram: {e}"));
+            }
+        }
+    }
+}
+
+/// Trata indisponibilidade do portal: loga e notifica (backoff é do chamador).
+async fn notify_portal_down(app: &AppHandle, config: &AutomationConfig, error: &str) {
+    emit_log(app, "ERRO", &format!("Portal inacessível (login/navegação falhou): {error}"));
+    emit_status(app, true, "Portal indisponível. Nova tentativa em 5min...", Some("Portal-down"));
+    notify(
+        app,
+        config,
+        &format!("⚠️ Não consegui acessar o portal: {error}\nNova tentativa em 5 minutos."),
+    )
+    .await;
 }
 
 /// Calculate adaptive heartbeat interval

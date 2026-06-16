@@ -410,8 +410,9 @@ pub fn parse_time_minutes(time_str: &str) -> Option<i32> {
     Some(hours * 60 + minutes)
 }
 
-/// Take an error screenshot and save to app data directory
-async fn take_error_screenshot(
+/// Take an error screenshot and save to app data directory.
+/// Público para o scheduler poder capturar a tela e anexar no Telegram.
+pub async fn take_error_screenshot(
     page: &Page,
     app: &AppHandle,
     context: &str,
