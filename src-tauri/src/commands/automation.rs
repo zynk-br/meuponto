@@ -40,6 +40,19 @@ pub async fn start_automation(
         return Err("Senha não fornecida.".to_string());
     }
 
+    let pre_assigned_interval = data.settings.get("preAssignedInterval")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    // Gate de validação: não inicia com agenda inválida.
+    let validation = crate::automation::validation::validate_schedule(&data.schedule, pre_assigned_interval);
+    if !validation.valid {
+        return Err(format!(
+            "Agenda inválida. Corrija antes de iniciar: {}",
+            crate::automation::validation::format_issues(&validation)
+        ));
+    }
+
     let config = AutomationConfig {
         schedule: data.schedule,
         folha: data.credentials.folha,
@@ -50,9 +63,7 @@ pub async fn start_automation(
         telegram_chat_id: data.settings.get("telegramChatId")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
-        pre_assigned_interval: data.settings.get("preAssignedInterval")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false),
+        pre_assigned_interval,
     };
 
     manager.start(app, config).await

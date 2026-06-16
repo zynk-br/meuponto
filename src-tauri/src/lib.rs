@@ -39,6 +39,7 @@ pub fn run() {
             credentials::delete_credential,
             // App info
             commands::get_app_version,
+            commands::validate_schedule,
             // Automation
             automation_cmd::start_automation,
             automation_cmd::stop_automation,

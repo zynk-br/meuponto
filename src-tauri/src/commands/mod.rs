@@ -8,6 +8,15 @@ pub fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/// Valida a agenda semanal e retorna pendências por-dia (sem efeitos colaterais).
+#[tauri::command]
+pub fn validate_schedule(
+    schedule: serde_json::Value,
+    pre_assigned_interval: bool,
+) -> crate::automation::validation::ValidationResult {
+    crate::automation::validation::validate_schedule(&schedule, pre_assigned_interval)
+}
+
 /// Comando de teste seguro: apenas lê os pontos do dia, sem registrar nada.
 #[tauri::command]
 pub async fn test_sync_points(
