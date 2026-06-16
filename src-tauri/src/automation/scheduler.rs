@@ -205,6 +205,7 @@ async fn automation_heartbeat_loop(
             Some(mut p) => {
                 p.reconcile(&existing_points, &now_iso);
                 let _ = p.save(app);
+                p.archive(app);
                 p
             }
             None => {
@@ -230,7 +231,15 @@ async fn automation_heartbeat_loop(
         let idx = match plan.next_actionable() {
             Some(i) => i,
             None => {
-                // Tudo registrado hoje. Aguarda a próxima (dia seguinte).
+                // Tudo registrado hoje → resumo diário no Telegram (uma vez).
+                if plan.all_registered() && !plan.summary_sent {
+                    let msg = format!("📋 Resumo do dia {}: {}", plan.date, plan.summary());
+                    emit_log(app, "SUCESSO", &msg);
+                    notify(app, config, &msg).await;
+                    plan.summary_sent = true;
+                    let _ = plan.save(app);
+                    plan.archive(app);
+                }
                 emit_status(app, true, "Todas as batidas de hoje registradas.", None);
                 wait_for_next_lookahead(app, config, &existing_points, cancel_token).await;
                 continue;
@@ -268,6 +277,7 @@ async fn automation_heartbeat_loop(
 
         perform_punch_with_retry(app, browser, config, &mut plan, idx, &existing_points, cancel_token).await;
         let _ = plan.save(app);
+        plan.archive(app);
 
         wait_or_cancel(cancel_token, std::time::Duration::from_secs(60)).await;
     }

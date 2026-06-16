@@ -15,6 +15,9 @@ use crate::automation::portal::parse_time_minutes;
 const STORE_FILENAME: &str = "settings.json";
 const DAY_PLAN_KEY: &str = "dayPlan";
 const DAY_PLAN_DRY_KEY: &str = "dayPlanDryRun";
+const PUNCH_HISTORY_KEY: &str = "punchHistory";
+/// Quantos dias de histórico manter.
+const HISTORY_MAX_DAYS: usize = 30;
 
 /// Chave de persistência conforme o modo (real x simulação), para que o
 /// dry-run nunca contamine o plano real (usado na recuperação ao reiniciar).
@@ -80,6 +83,9 @@ pub struct DayPlan {
     pub punches: Vec<PlannedPunch>,
     pub created_at: String,
     pub last_reconciled_at: Option<String>,
+    /// Evita reenviar o resumo diário a cada ciclo após a conclusão.
+    #[serde(default)]
+    pub summary_sent: bool,
 }
 
 /// Lê um campo de horário ("HH:MM") da entrada de agenda; "" se ausente.
@@ -168,6 +174,7 @@ impl DayPlan {
             punches,
             created_at: created_at.to_string(),
             last_reconciled_at: None,
+            summary_sent: false,
         }
     }
 
@@ -230,6 +237,63 @@ impl DayPlan {
     /// Verdadeiro quando não resta nenhuma batida acionável.
     pub fn is_complete(&self) -> bool {
         self.next_actionable().is_none()
+    }
+
+    /// Verdadeiro quando há batidas e todas foram registradas.
+    pub fn all_registered(&self) -> bool {
+        !self.punches.is_empty()
+            && self.punches.iter().all(|p| p.status == PunchStatus::Registered)
+    }
+
+    /// Resumo legível do dia (para Telegram/log).
+    pub fn summary(&self) -> String {
+        let registradas: Vec<String> = self
+            .punches
+            .iter()
+            .filter(|p| p.status == PunchStatus::Registered)
+            .map(|p| format!("{}={}", p.punch_type, p.planned_time))
+            .collect();
+        let reagendadas = self.punches.iter().filter(|p| p.original_time != p.planned_time).count();
+        let falhas = self.punches.iter().filter(|p| p.status == PunchStatus::Failed).count();
+        format!(
+            "✅ {} | reagendadas: {} | falhas: {}",
+            if registradas.is_empty() { "nenhuma".to_string() } else { registradas.join(", ") },
+            reagendadas,
+            falhas
+        )
+    }
+
+    /// Arquiva este plano no histórico (`punchHistory`), por data, mantendo os
+    /// últimos HISTORY_MAX_DAYS dias. Não arquiva planos de simulação.
+    pub fn archive(&self, app: &AppHandle) {
+        if self.dry_run {
+            return;
+        }
+        let store = match app.store(STORE_FILENAME) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let mut hist = store
+            .get(PUNCH_HISTORY_KEY)
+            .and_then(|v| v.as_object().cloned())
+            .unwrap_or_default();
+
+        if let Ok(v) = serde_json::to_value(self) {
+            hist.insert(self.date.clone(), v);
+        }
+
+        // Mantém apenas os últimos N dias (chaves YYYY-MM-DD ordenam cronologicamente).
+        if hist.len() > HISTORY_MAX_DAYS {
+            let mut keys: Vec<String> = hist.keys().cloned().collect();
+            keys.sort();
+            let excedente = hist.len() - HISTORY_MAX_DAYS;
+            for k in keys.into_iter().take(excedente) {
+                hist.remove(&k);
+            }
+        }
+
+        store.set(PUNCH_HISTORY_KEY, serde_json::Value::Object(hist));
+        let _ = store.save();
     }
 
     pub fn mark_registered(&mut self, idx: usize, at_iso: &str) {
@@ -478,6 +542,30 @@ mod tests {
         assert_eq!(e1.planned_time, "08:00"); // inalterado
         assert_eq!(s2.planned_time, "17:10");
         assert_eq!(s2.status, PunchStatus::Rescheduled);
+    }
+
+    #[test]
+    fn all_registered_and_summary() {
+        let d = day("08:00", "12:00", "13:00", "17:00");
+        let mut plan = DayPlan::build("2026-06-16", "Terça-feira", &d, &[], false, false, "now");
+        assert!(!plan.all_registered());
+        for i in 0..plan.punches.len() {
+            plan.mark_registered(i, "ts");
+        }
+        assert!(plan.all_registered());
+        let s = plan.summary();
+        assert!(s.contains("entrada1=08:00"));
+        assert!(s.contains("reagendadas: 0"));
+        assert!(s.contains("falhas: 0"));
+    }
+
+    #[test]
+    fn summary_counts_reschedules() {
+        let d = day("08:00", "12:00", "13:00", "17:00");
+        let mut plan = DayPlan::build("2026-06-16", "Terça-feira", &d, &[], false, false, "now");
+        plan.apply_reschedule("entrada1", 10, &[]); // muda entrada1 e saida2
+        let s = plan.summary();
+        assert!(s.contains("reagendadas: 2"), "{s}");
     }
 
     #[test]

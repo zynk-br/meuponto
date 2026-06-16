@@ -42,6 +42,7 @@ pub fn run() {
             settings::save_settings,
             settings::load_schedule,
             settings::save_schedule,
+            settings::load_punch_history,
             // Credentials
             credentials::get_credential,
             credentials::set_credential,

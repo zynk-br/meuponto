@@ -44,6 +44,13 @@ export async function deleteCredential(account: string): Promise<void> {
   await invoke('delete_credential', { account });
 }
 
+// ---- Histórico ----
+
+export async function loadPunchHistory(): Promise<Record<string, unknown> | null> {
+  const result = await invoke<Record<string, unknown> | null>('load_punch_history');
+  return result ?? null;
+}
+
 // ---- App Info ----
 
 export async function getAppVersion(): Promise<string> {

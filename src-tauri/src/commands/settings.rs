@@ -43,3 +43,10 @@ pub fn save_schedule(app: AppHandle, schedule: serde_json::Value) -> Result<(), 
     store.set("userSchedule", schedule);
     store.save().map_err(|e| e.to_string())
 }
+
+/// Histórico de batidas por dia (mapa "YYYY-MM-DD" → plano do dia).
+#[tauri::command]
+pub fn load_punch_history(app: AppHandle) -> Result<Option<serde_json::Value>, String> {
+    let store = app.store(STORE_FILENAME).map_err(|e| e.to_string())?;
+    Ok(store.get("punchHistory"))
+}
