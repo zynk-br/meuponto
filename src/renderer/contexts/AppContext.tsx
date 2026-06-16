@@ -51,11 +51,10 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const [isTelegramTutorialModalOpen, setIsTelegramTutorialModalOpen] = useState(false);
   const [currentUserCredentials, setCurrentUserCredentials] = useState<UserCredentials | null>(null);
 
-  const addLogCallback = useCallback((level: LogLevel, message: string, fromMain: boolean = false) => {
+  const addLogCallback = useCallback((level: LogLevel, message: string, _fromMain: boolean = false) => {
     const timestamp = new Date().toLocaleTimeString('pt-BR', { hour12: false });
-    const logSource = fromMain ? "[MAIN] " : "";
     setLogs(prevLogs => {
-      const newLogs = [...prevLogs, { timestamp, level, message: `${logSource}${message}` }];
+      const newLogs = [...prevLogs, { timestamp, level, message }];
       // Cap logs at MAX_LOG_ENTRIES to prevent memory leaks
       if (newLogs.length > MAX_LOG_ENTRIES) {
         return newLogs.slice(newLogs.length - MAX_LOG_ENTRIES);
