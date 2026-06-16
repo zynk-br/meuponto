@@ -1,6 +1,10 @@
 use reqwest;
 use std::path::Path;
 
+/// Token fixo do bot do Meu Ponto (o mesmo da versão Electron). O usuário só
+/// configura o Chat ID; o token não é exposto na UI.
+pub const DEFAULT_BOT_TOKEN: &str = "7391147858:AAFt8DP14NgxZin3Bgr9i5q2FZO1-i7gcAk";
+
 /// Send a text message via Telegram Bot API
 pub async fn send_text(token: &str, chat_id: &str, message: &str) -> Result<(), String> {
     if chat_id.is_empty() {

@@ -70,9 +70,8 @@ pub async fn start_automation(
         schedule: data.schedule,
         folha: data.credentials.folha,
         senha,
-        telegram_bot_token: data.settings.get("telegramBotToken")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string()),
+        // Token fixo (não vem da UI) — usuário só configura o Chat ID.
+        telegram_bot_token: Some(crate::notifications::telegram::DEFAULT_BOT_TOKEN.to_string()),
         telegram_chat_id: data.settings.get("telegramChatId")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
@@ -153,7 +152,7 @@ pub async fn try_resume(app: AppHandle) {
         schedule: resume.get("schedule").cloned().unwrap_or_else(|| serde_json::json!({})),
         folha,
         senha,
-        telegram_bot_token: resume.get("telegramBotToken").and_then(|v| v.as_str()).map(String::from),
+        telegram_bot_token: Some(crate::notifications::telegram::DEFAULT_BOT_TOKEN.to_string()),
         telegram_chat_id: resume.get("telegramChatId").and_then(|v| v.as_str()).map(String::from),
         pre_assigned_interval: resume.get("preAssignedInterval").and_then(|v| v.as_bool()).unwrap_or(false),
         dry_run: false,

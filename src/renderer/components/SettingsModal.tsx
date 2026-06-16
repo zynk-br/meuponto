@@ -105,23 +105,6 @@ const SettingsModal: React.FC = () => {
             <h3 className="text-lg font-semibold mb-3 text-primary-600 dark:text-primary-400">Notificações do Telegram</h3>
             <div className="space-y-3">
               <div>
-                <label htmlFor="telegramBotToken" className="block text-sm font-medium text-secondary-700 dark:text-secondary-300">
-                  Bot Token
-                </label>
-                <input
-                  type="password"
-                  name="telegramBotToken"
-                  id="telegramBotToken"
-                  value={localSettings.telegramBotToken || ''}
-                  onChange={handleInputChange}
-                  className="mt-1 block w-full px-3 py-2 bg-white dark:bg-secondary-700 border border-secondary-300 dark:border-secondary-600 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
-                  placeholder="Token do seu bot Telegram"
-                />
-                <p className="text-xs text-secondary-500 dark:text-secondary-400 mt-1">
-                  Crie um bot via @BotFather no Telegram para obter o token.
-                </p>
-              </div>
-              <div>
                 <label htmlFor="telegramChatId" className="block text-sm font-medium text-secondary-700 dark:text-secondary-300">
                   Chat ID do Usuário
                 </label>
