@@ -10,7 +10,7 @@
     "beforeBuildCommand": "npm run build:frontend"
   },
   "app": {
-    "withGlobalTauri": false,
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "Meu Ponto",
