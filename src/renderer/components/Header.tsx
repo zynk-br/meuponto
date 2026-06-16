@@ -1,10 +1,11 @@
 // Arquivo agora em: src/renderer/components/Header.tsx
 import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../hooks/useAppContext'; // Ajustado
+import { View } from '../types';
 
 const Header: React.FC = () => {
   const [currentTime, setCurrentTime] = useState('');
-  const { setIsSettingsModalOpen, toggleTheme, theme, settings, updateSettings } = useAppContext();
+  const { setIsSettingsModalOpen, setIsHistoryModalOpen, currentView, toggleTheme, theme, settings, updateSettings } = useAppContext();
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -39,6 +40,15 @@ const Header: React.FC = () => {
         >
           {theme === 'light' ? <i className="fas fa-moon"></i> : <i className="fas fa-sun"></i>}
         </button>
+        {currentView === View.APP_VIEW && (
+          <button
+            onClick={() => setIsHistoryModalOpen(true)}
+            className="p-2 rounded-md hover:bg-primary-700 dark:hover:bg-primary-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            aria-label="Abrir histórico"
+          >
+            <i className="fas fa-history"></i> Histórico
+          </button>
+        )}
         <button
           onClick={() => setIsSettingsModalOpen(true)}
           className="p-2 rounded-md hover:bg-primary-700 dark:hover:bg-primary-900 focus:outline-none focus:ring-2 focus:ring-primary-500"

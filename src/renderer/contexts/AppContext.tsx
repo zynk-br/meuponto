@@ -23,6 +23,8 @@ interface AppContextType {
   setAutomationState: (state: Partial<AutomationState>) => void;
   isSettingsModalOpen: boolean;
   setIsSettingsModalOpen: (isOpen: boolean) => void;
+  isHistoryModalOpen: boolean;
+  setIsHistoryModalOpen: (isOpen: boolean) => void;
   isTelegramTutorialModalOpen: boolean;
   setIsTelegramTutorialModalOpen: (isOpen: boolean) => void;
   currentUserCredentials: UserCredentials | null;
@@ -48,6 +50,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     currentTask: null,
   });
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [isTelegramTutorialModalOpen, setIsTelegramTutorialModalOpen] = useState(false);
   const [currentUserCredentials, setCurrentUserCredentials] = useState<UserCredentials | null>(null);
 
@@ -196,6 +199,8 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       setAutomationState: setAutomationStateCallback,
       isSettingsModalOpen,
       setIsSettingsModalOpen,
+      isHistoryModalOpen,
+      setIsHistoryModalOpen,
       isTelegramTutorialModalOpen,
       setIsTelegramTutorialModalOpen,
       currentUserCredentials,

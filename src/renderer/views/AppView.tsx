@@ -546,58 +546,6 @@ const AppView: React.FC = () => {
     }
   };
 
-  const [isTesting, setIsTesting] = useState(false);
-  const [testResults, setTestResults] = useState<string[] | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [history, setHistory] = useState<Record<string, any> | null>(null);
-
-  const handleLoadHistory = async () => {
-    try {
-      const h = await tauriAPI.loadPunchHistory();
-      setHistory(h || {});
-      const n = h ? Object.keys(h).length : 0;
-      addLog(LogLevel.INFO, n > 0 ? `Histórico carregado: ${n} dia(s).` : "Histórico ainda vazio.");
-    } catch (e) {
-      addLog(LogLevel.ERROR, `Erro ao carregar histórico: ${e}`);
-    }
-  };
-
-  const statusBadgeClass = (status: string): string => {
-    switch (status) {
-      case 'Registered': return 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300';
-      case 'Failed': return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300';
-      case 'Rescheduled': return 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300';
-      default: return 'bg-secondary-100 dark:bg-secondary-700 text-secondary-600 dark:text-secondary-300';
-    }
-  };
-
-  const handleTestSync = async () => {
-    if (!currentUserCredentials?.folha || !currentUserCredentials?.senha) {
-      addLog(LogLevel.ERROR, "Credenciais não disponíveis. Faça login primeiro.");
-      return;
-    }
-    setIsTesting(true);
-    setTestResults(null);
-    addLog(LogLevel.INFO, "Iniciando teste de sincronização (somente leitura)...");
-
-    try {
-      const points = await tauriAPI.testSyncPoints(
-        currentUserCredentials.folha,
-        currentUserCredentials.senha
-      );
-      setTestResults(points);
-      if (points.length > 0) {
-        addLog(LogLevel.SUCCESS, `Teste concluído: ${points.length} ponto(s) hoje → ${points.join(', ')}`);
-      } else {
-        addLog(LogLevel.INFO, "Teste concluído: nenhum ponto registrado hoje.");
-      }
-    } catch (error) {
-      addLog(LogLevel.ERROR, `Teste falhou: ${error}`);
-    } finally {
-      setIsTesting(false);
-    }
-  };
-
   return (
     <div className="p-6 space-y-6 bg-secondary-50 bg-gradient-to-br from-primary-500 to-primary-700 dark:from-primary-700 dark:to-primary-900 flex-grow overflow-y-auto">
       <div className="bg-white dark:bg-secondary-800 p-4 rounded-lg shadow">
@@ -823,14 +771,6 @@ const AppView: React.FC = () => {
             <i className="fas fa-play mr-2"></i> Executar
           </button>
           <button
-            onClick={() => handleExecute(true)}
-            disabled={automationState.isRunning}
-            title="Simular o dia (dry-run): percorre o plano sem registrar ponto de verdade"
-            className="px-6 py-2 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50 flex items-center"
-          >
-            <i className="fas fa-flask mr-2"></i> Simular
-          </button>
-          <button
             onClick={handleClear}
             disabled={automationState.isRunning}
             className="px-6 py-2 bg-yellow-500 hover:bg-yellow-600 text-white font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-400 disabled:opacity-50 flex items-center"
@@ -844,86 +784,8 @@ const AppView: React.FC = () => {
           >
             <i className="fas fa-stop mr-2"></i> Interromper
           </button>
-          <button
-            onClick={handleTestSync}
-            disabled={automationState.isRunning || isTesting}
-            title="Teste seguro: apenas lê os pontos de hoje, sem registrar nada"
-            className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 flex items-center"
-          >
-            {isTesting ? (
-              <><i className="fas fa-spinner fa-spin mr-2"></i> Testando...</>
-            ) : (
-              <><i className="fas fa-search mr-2"></i> Testar Sync</>
-            )}
-          </button>
-          <button
-            onClick={handleLoadHistory}
-            title="Ver o histórico das batidas dos últimos dias"
-            className="px-6 py-2 bg-secondary-600 hover:bg-secondary-700 text-white font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-secondary-500 disabled:opacity-50 flex items-center"
-          >
-            <i className="fas fa-history mr-2"></i> Histórico
-          </button>
         </div>
       </div>
-
-      {history !== null && (
-        <div className="bg-white dark:bg-secondary-800 p-4 rounded-lg shadow">
-          <h3 className="text-lg font-semibold text-primary-700 dark:text-primary-300 mb-3">
-            <i className="fas fa-history mr-2"></i>
-            Histórico de Batidas
-          </h3>
-          {Object.keys(history).length === 0 ? (
-            <p className="text-sm text-secondary-500 dark:text-secondary-400">Nenhum histórico registrado ainda.</p>
-          ) : (
-            <div className="space-y-3">
-              {Object.entries(history)
-                .sort((a, b) => b[0].localeCompare(a[0]))
-                .map(([date, plan]) => (
-                  <div key={date} className="border border-secondary-200 dark:border-secondary-700 rounded-md p-3">
-                    <div className="text-sm font-medium text-secondary-800 dark:text-secondary-200 mb-2">
-                      {date} <span className="text-secondary-500 dark:text-secondary-400">({plan.dayKey})</span>
-                      {plan.invalid && <span className="ml-2 text-yellow-600 dark:text-yellow-400">⚠️ dia inválido</span>}
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {(plan.punches || []).map((p: { punchType: string; plannedTime: string; status: string }, i: number) => (
-                        <span key={i} className={`px-3 py-1 rounded-full text-sm font-mono ${statusBadgeClass(p.status)}`}>
-                          {p.punchType} {p.plannedTime}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {testResults !== null && (
-        <div className="bg-white dark:bg-secondary-800 p-4 rounded-lg shadow">
-          <h3 className="text-lg font-semibold text-primary-700 dark:text-primary-300 mb-2">
-            <i className="fas fa-clipboard-check mr-2"></i>
-            Resultado do Teste (somente leitura)
-          </h3>
-          {testResults.length > 0 ? (
-            <div className="space-y-2">
-              <p className="text-sm text-secondary-600 dark:text-secondary-300">
-                {testResults.length} ponto(s) registrado(s) hoje:
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {testResults.map((time, i) => (
-                  <span key={i} className="px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-sm font-mono font-medium">
-                    {time}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <p className="text-sm text-secondary-500 dark:text-secondary-400">
-              Nenhum ponto registrado hoje.
-            </p>
-          )}
-        </div>
-      )}
 
       <ConfirmDialog
         isOpen={showClearConfirm}

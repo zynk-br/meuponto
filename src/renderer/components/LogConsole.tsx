@@ -2,18 +2,24 @@
 import React, { useRef, useEffect } from 'react';
 import { useAppContext } from '../hooks/useAppContext'; // Ajustado
 import { LOG_LEVEL_COLORS } from '../constants'; // Ajustado
+import { LogLevel } from '../types';
 
 interface LogConsoleProps {
   isVisible: boolean;
 }
 
 const LogConsole: React.FC<LogConsoleProps> = ({ isVisible }) => {
-  const { logs, clearLogs } = useAppContext();
+  const { logs, clearLogs, settings } = useAppContext();
   const logsEndRef = useRef<HTMLDivElement>(null);
+
+  // Esconde logs DEBUG quando "Logs detalhados" está desativado.
+  const visibleLogs = settings.detailedLogs
+    ? logs
+    : logs.filter((log) => log.level !== LogLevel.DEBUG);
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [logs]);
+  }, [visibleLogs.length]);
 
   if (!isVisible) {
     return null;
@@ -32,7 +38,7 @@ const LogConsole: React.FC<LogConsoleProps> = ({ isVisible }) => {
         </button>
       </div>
       <div className="flex-grow p-2 overflow-y-auto text-xs font-mono">
-        {logs.map((log, index) => (
+        {visibleLogs.map((log, index) => (
           <div key={index} className="whitespace-pre-wrap">
             <span className="text-secondary-500 dark:text-secondary-400">{log.timestamp}</span>
             <span className={`font-bold mx-1 ${LOG_LEVEL_COLORS[log.level]}`}>[{log.level}]</span>

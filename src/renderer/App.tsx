@@ -6,6 +6,7 @@ import Header from './components/Header';
 import Footer from './components/Footer';
 import LogConsole from './components/LogConsole';
 import SettingsModal from './components/SettingsModal';
+import HistoryModal from './components/HistoryModal';
 import TelegramTutorialModal from './components/TelegramTutorialModal';
 import UpdateNotification from './components/UpdateNotification';
 
@@ -43,6 +44,7 @@ const AppContent: React.FC = () => {
       <LogConsole isVisible={settings.showLogConsole} />
       <Footer />
       <SettingsModal />
+      <HistoryModal />
       <TelegramTutorialModal />
       <UpdateNotification />
     </div>

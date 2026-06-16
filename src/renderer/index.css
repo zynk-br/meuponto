@@ -16,3 +16,18 @@ body {
 .no-drag-region {
   -webkit-app-region: no-drag;
 }
+
+/* O WebKit (WKWebView no macOS) não aplica de forma consistente a cor do texto
+   em input[type=time], deixando os horários apagados/ilegíveis. Forçamos uma
+   cor explícita por tema para manter tudo legível (como na versão Electron). */
+input[type="time"]::-webkit-datetime-edit {
+  color: #1e293b; /* secondary-800 (tema claro) */
+}
+.dark input[type="time"]::-webkit-datetime-edit {
+  color: #e2e8f0; /* secondary-200 (tema escuro) */
+}
+
+/* Ícone do seletor de horário legível no tema escuro */
+.dark input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.85);
+}
