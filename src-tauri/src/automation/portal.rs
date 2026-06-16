@@ -26,6 +26,12 @@ pub async fn login_to_portal(
     // Wait for the page to fully load
     sleep(Duration::from_secs(5)).await;
 
+    // JSON-encode credentials antes de embutir no JS: gera literais de string
+    // devidamente escapados, evitando injeção e quebra de login quando a senha
+    // contém aspas/barras/caracteres especiais.
+    let folha_js = serde_json::to_string(folha).unwrap_or_else(|_| "\"\"".to_string());
+    let senha_js = serde_json::to_string(senha).unwrap_or_else(|_| "\"\"".to_string());
+
     // Fill login form using JavaScript (more reliable than type_str for SPAs)
     let fill_result: String = page
         .evaluate(format!(
@@ -44,10 +50,10 @@ pub async fn login_to_portal(
                     window.HTMLInputElement.prototype, 'value'
                 ).set;
 
-                nativeInputValueSetter.call(folhaInput, '{folha}');
+                nativeInputValueSetter.call(folhaInput, {folha_js});
                 folhaInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
 
-                nativeInputValueSetter.call(senhaInput, '{senha}');
+                nativeInputValueSetter.call(senhaInput, {senha_js});
                 senhaInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
 
                 loginBtn.click();
