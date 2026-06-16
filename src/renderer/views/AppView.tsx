@@ -61,10 +61,10 @@ const DayRowEditor: React.FC<{ day: DayOfWeek, entry: TimeEntry, onChange: (newE
               disabled={isDisabled}
               readOnly={readonly}
               title={isPreAssigned ? 'Intervalo pré-assinalado (fixo)' : undefined}
-              className={`w-full p-2 border rounded-md text-sm focus:ring-primary-500 focus:border-primary-500 ${isPreAssigned
+              className={`w-full p-2 border rounded-md text-sm focus:ring-primary-500 focus:border-primary-500 ${(isPreAssigned || entry.feriado)
                 ? 'bg-secondary-200 dark:bg-secondary-900 border-secondary-400 dark:border-secondary-700 cursor-not-allowed opacity-70'
-                : (entry.feriado || readonly)
-                  ? 'bg-secondary-200 dark:bg-secondary-900 border-secondary-400 dark:border-secondary-700 cursor-not-allowed opacity-70'
+                : readonly
+                  ? 'bg-transparent border-secondary-300 dark:border-secondary-600 cursor-not-allowed'
                   : 'bg-transparent border-secondary-300 dark:border-secondary-600'}`}
             />
           </td>
