@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { enable as enableAutostart, disable as disableAutostart, isEnabled as isAutostartEnabled } from '@tauri-apps/plugin-autostart';
 import Modal from './Modal';
 import ConfirmDialog from './ConfirmDialog';
 import { useAppContext } from '../hooks/useAppContext';
@@ -18,12 +19,29 @@ const SettingsModal: React.FC = () => {
 
   const [localSettings, setLocalSettings] = useState(settings);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [autostartOn, setAutostartOn] = useState(false);
 
   useEffect(() => {
     if (isSettingsModalOpen) {
       setLocalSettings(settings);
+      isAutostartEnabled().then(setAutostartOn).catch(() => setAutostartOn(false));
     }
   }, [isSettingsModalOpen, settings]);
+
+  const handleAutostartToggle = async (checked: boolean) => {
+    try {
+      if (checked) {
+        await enableAutostart();
+      } else {
+        await disableAutostart();
+      }
+      setAutostartOn(checked);
+      addLog(LogLevel.INFO, `Iniciar com o sistema ${checked ? 'ativado' : 'desativado'}.`);
+    } catch (err) {
+      addLog(LogLevel.ERROR, `Falha ao ${checked ? 'ativar' : 'desativar'} início automático: ${err}`);
+      setAutostartOn(!checked);
+    }
+  };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
@@ -157,6 +175,22 @@ const SettingsModal: React.FC = () => {
                     className="sr-only peer"
                     checked={localSettings.detailedLogs || false}
                     onChange={handleInputChange}
+                  />
+                  <div className="w-11 h-6 bg-secondary-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 dark:peer-focus:ring-primary-800 rounded-full peer dark:bg-secondary-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-secondary-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-secondary-600 peer-checked:bg-primary-600"></div>
+                </label>
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-sm font-medium text-secondary-700 dark:text-secondary-300">Iniciar com o sistema</span>
+                  <p className="text-xs text-secondary-500 dark:text-secondary-400">Abre o Meu Ponto automaticamente ao ligar o computador</p>
+                </div>
+                <label htmlFor="autostartToggle" className="inline-flex relative items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    id="autostartToggle"
+                    className="sr-only peer"
+                    checked={autostartOn}
+                    onChange={(e) => handleAutostartToggle(e.target.checked)}
                   />
                   <div className="w-11 h-6 bg-secondary-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 dark:peer-focus:ring-primary-800 rounded-full peer dark:bg-secondary-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-secondary-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-secondary-600 peer-checked:bg-primary-600"></div>
                 </label>
