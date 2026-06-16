@@ -67,27 +67,33 @@ pub async fn login_to_portal(
         .map_err(|e| format!("Erro ao converter resultado: {e}"))?;
 
     if fill_result.starts_with("ERRO:") {
-        let _ = take_error_screenshot(&page, app, "login_fields").await;
-        return Err(fill_result);
+        // Campos de login ausentes: quase sempre porque já existe uma sessão
+        // ativa (cookies de um ciclo anterior) e o portal já caiu na área
+        // logada. NÃO falha aqui — segue para o menu/verificação. Se de fato
+        // não estiver logado, o page_check no final acusa o erro.
+        emit_log(
+            app,
+            "DEBUG",
+            &format!("Formulário de login ausente ({fill_result}); assumindo sessão ativa e seguindo..."),
+        );
+    } else {
+        emit_log(app, "DEBUG", "Formulário preenchido, aguardando navegação...");
+        // Wait for navigation after login
+        sleep(Duration::from_secs(8)).await;
     }
 
-    emit_log(app, "DEBUG", "Formulário preenchido, aguardando navegação...");
-
-    // Wait for navigation after login
-    sleep(Duration::from_secs(8)).await;
-
-    // Try to click "Incluir Ponto" menu — poll for up to 15 seconds
-    let mut menu_found = false;
+    // Try to click "Incluir Ponto" menu — poll for up to 15 seconds.
+    // Se já estivermos na página (sessão ativa), o menu é opcional.
     for attempt in 1..=5 {
         let click_result: String = page
             .evaluate(
                 r#"
                 (() => {
                     const menu = document.querySelector('#menu-incluir-ponto');
-                    if (menu) {
-                        menu.click();
-                        return 'OK';
-                    }
+                    if (menu) { menu.click(); return 'OK'; }
+                    // Já está na página de Incluir Ponto?
+                    const loc = document.querySelector('#localizacao-incluir-ponto');
+                    if (loc || window.location.href.includes('incluir-ponto')) return 'ALREADY';
                     return 'NOT_FOUND';
                 })()
                 "#,
@@ -98,8 +104,11 @@ pub async fn login_to_portal(
             .map_err(|e| format!("Erro ao converter: {e}"))?;
 
         if click_result == "OK" {
-            menu_found = true;
             emit_log(app, "DEBUG", "Menu 'Incluir Ponto' clicado.");
+            break;
+        }
+        if click_result == "ALREADY" {
+            emit_log(app, "DEBUG", "Já na página de Incluir Ponto (sessão ativa).");
             break;
         }
 
@@ -109,11 +118,6 @@ pub async fn login_to_portal(
             &format!("Menu não encontrado, tentativa {attempt}/5..."),
         );
         sleep(Duration::from_secs(3)).await;
-    }
-
-    if !menu_found {
-        let _ = take_error_screenshot(&page, app, "login_menu").await;
-        return Err("Menu 'Incluir Ponto' não encontrado após login. Verifique credenciais.".to_string());
     }
 
     // Wait for the punch page to load
