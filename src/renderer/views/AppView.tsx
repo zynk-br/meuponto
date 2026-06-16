@@ -45,22 +45,31 @@ const DayRowEditor: React.FC<{ day: DayOfWeek, entry: TimeEntry, onChange: (newE
   return (
     <tr className="border-b border-secondary-200 dark:border-secondary-700 hover:bg-secondary-50 dark:hover:bg-secondary-800 transition-colors">
       <td className="py-3 px-4 text-sm font-medium text-secondary-800 dark:text-secondary-200">{day}</td>
-      {['entrada1', 'saida1', 'entrada2', 'saida2'].map((field) => (
-        <td key={field} className="py-2 px-3">
-          <input
-            type="time"
-            value={
-              (preAssignedInterval && field === 'saida1') ? '12:00' :
-                (preAssignedInterval && field === 'entrada2') ? '13:00' :
-                  entry[field as keyof Omit<TimeEntry, 'feriado'>]
-            }
-            onChange={(e) => handleTimeChange(field as keyof Omit<TimeEntry, 'feriado'>, e.target.value)}
-            disabled={entry.feriado || readonly || (preAssignedInterval && (field === 'saida1' || field === 'entrada2'))}
-            readOnly={readonly}
-            className={`w-full p-2 border rounded-md text-sm bg-white dark:bg-secondary-700 text-secondary-700 dark:text-secondary-200 border-secondary-300 dark:border-secondary-600 focus:ring-primary-500 focus:border-primary-500 ${(entry.feriado || readonly || (preAssignedInterval && (field === 'saida1' || field === 'entrada2'))) ? 'bg-secondary-100 dark:bg-secondary-800 cursor-not-allowed text-secondary-400' : ''}`}
-          />
-        </td>
-      ))}
+      {['entrada1', 'saida1', 'entrada2', 'saida2'].map((field) => {
+        const isPreAssigned = preAssignedInterval && (field === 'saida1' || field === 'entrada2');
+        const isDisabled = entry.feriado || readonly || isPreAssigned;
+        return (
+          <td key={field} className="py-2 px-3">
+            <input
+              type="time"
+              value={
+                isPreAssigned
+                  ? (field === 'saida1' ? '12:00' : '13:00')
+                  : entry[field as keyof Omit<TimeEntry, 'feriado'>]
+              }
+              onChange={(e) => handleTimeChange(field as keyof Omit<TimeEntry, 'feriado'>, e.target.value)}
+              disabled={isDisabled}
+              readOnly={readonly}
+              title={isPreAssigned ? 'Intervalo pré-assinalado (fixo)' : undefined}
+              className={`w-full p-2 border rounded-md text-sm focus:ring-primary-500 focus:border-primary-500 ${isPreAssigned
+                ? 'bg-secondary-200 dark:bg-secondary-900 border-secondary-400 dark:border-secondary-700 cursor-not-allowed opacity-70'
+                : (entry.feriado || readonly)
+                  ? 'bg-secondary-200 dark:bg-secondary-900 border-secondary-400 dark:border-secondary-700 cursor-not-allowed opacity-70'
+                  : 'bg-transparent border-secondary-300 dark:border-secondary-600'}`}
+            />
+          </td>
+        );
+      })}
       <td className="py-3 px-4 text-center">
         <input
           type="checkbox"
