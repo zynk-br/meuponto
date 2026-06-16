@@ -90,17 +90,9 @@ export async function testSyncPoints(
   return invoke<string[]>('test_sync_points', { folha, senha });
 }
 
-// ---- Update (stub — Fase 9) ----
-
-export async function downloadUpdate(): Promise<void> {
-  // TODO: Fase 9 — usar @tauri-apps/plugin-updater
-}
-
-export async function installUpdate(): Promise<void> {
-  // TODO: Fase 9 — usar @tauri-apps/plugin-updater
-}
-
 // ---- Event Listeners ----
+// (O fluxo de atualização agora usa @tauri-apps/plugin-updater diretamente
+//  no componente UpdateNotification.)
 
 export async function onLogFromMain(
   callback: (entry: { level: LogLevel; message: string }) => void
@@ -115,29 +107,5 @@ export async function onAutomationStatusUpdate(
 ): Promise<UnlistenFn> {
   return listen<AutomationState>('automation-status', (event) => {
     callback(event.payload);
-  });
-}
-
-export async function onUpdateAvailable(
-  callback: (info: { version: string }) => void
-): Promise<UnlistenFn> {
-  return listen<{ version: string }>('update-available', (event) => {
-    callback(event.payload);
-  });
-}
-
-export async function onUpdateProgress(
-  callback: (progress: { percent: number }) => void
-): Promise<UnlistenFn> {
-  return listen<{ percent: number }>('update-progress', (event) => {
-    callback(event.payload);
-  });
-}
-
-export async function onUpdateDownloaded(
-  callback: () => void
-): Promise<UnlistenFn> {
-  return listen('update-downloaded', () => {
-    callback();
   });
 }
