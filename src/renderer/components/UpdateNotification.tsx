@@ -1,55 +1,74 @@
-// src/renderer/components/UpdateNotification.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { check, type Update } from '@tauri-apps/plugin-updater';
+import { relaunch } from '@tauri-apps/plugin-process';
 import { APP_TITLE } from '../constants';
+
+// Intervalo de verificação de atualização em segundo plano (30 min).
+const CHECK_INTERVAL_MS = 30 * 60 * 1000;
 
 const UpdateNotification: React.FC = () => {
   const [isVisible, setIsVisible] = useState(false);
-  const [updateInfo, setUpdateInfo] = useState<{ version: string } | null>(null);
+  const [update, setUpdate] = useState<Update | null>(null);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isDownloaded, setIsDownloaded] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!window.electronAPI) return;
-
-    // Listener para quando uma atualização está disponível
-    const removeUpdateAvailableListener = window.electronAPI.onUpdateAvailable((info) => {
-      setUpdateInfo(info);
-      setIsDownloaded(false);
-      setIsDownloading(false);
-      setIsVisible(true);
-    });
-
-    // Listener para o progresso do download
-    const removeUpdateProgressListener = window.electronAPI.onUpdateProgress((progress) => {
-      setIsDownloading(true);
-      setDownloadProgress(progress.percent);
-    });
-
-    // Listener para quando o download termina
-    const removeUpdateDownloadedListener = window.electronAPI.onUpdateDownloaded(() => {
-      setIsDownloading(false);
-      setIsDownloaded(true);
-    });
-
-    return () => {
-      removeUpdateAvailableListener();
-      removeUpdateProgressListener();
-      removeUpdateDownloadedListener();
-    };
+  const checkForUpdate = useCallback(async () => {
+    try {
+      const found = await check();
+      if (found) {
+        setUpdate(found);
+        setIsDownloaded(false);
+        setIsDownloading(false);
+        setIsVisible(true);
+      }
+    } catch (e) {
+      // Sem release/endpoint indisponível (ex.: dev) — silencioso.
+      console.debug('Verificação de atualização falhou (ignorado):', e);
+    }
   }, []);
 
-  const handleDownload = () => {
-    if (window.electronAPI) {
-      window.electronAPI.downloadUpdate();
-      setIsDownloading(true);
+  useEffect(() => {
+    checkForUpdate();
+    const id = setInterval(checkForUpdate, CHECK_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [checkForUpdate]);
+
+  const handleDownload = async () => {
+    if (!update) return;
+    setErrorMsg(null);
+    setIsDownloading(true);
+    setDownloadProgress(0);
+
+    let total = 0;
+    let downloaded = 0;
+    try {
+      await update.downloadAndInstall((event) => {
+        switch (event.event) {
+          case 'Started':
+            total = event.data.contentLength ?? 0;
+            break;
+          case 'Progress':
+            downloaded += event.data.chunkLength;
+            setDownloadProgress(total > 0 ? (downloaded / total) * 100 : 0);
+            break;
+          case 'Finished':
+            setDownloadProgress(100);
+            break;
+        }
+      });
+      setIsDownloading(false);
+      setIsDownloaded(true);
+    } catch (e) {
+      setIsDownloading(false);
+      setErrorMsg(String(e));
     }
   };
 
-  const handleInstall = () => {
-    if (window.electronAPI) {
-      window.electronAPI.installUpdate();
-    }
+  const handleInstall = async () => {
+    // O update já foi instalado por downloadAndInstall; basta reiniciar.
+    await relaunch();
   };
 
   if (!isVisible) {
@@ -75,16 +94,18 @@ const UpdateNotification: React.FC = () => {
       </div>
 
       <div className="mt-2 text-sm text-secondary-600 dark:text-secondary-300">
-        {isDownloaded ? (
-          <p>A versão {updateInfo?.version} foi baixada e está pronta para ser instalada.</p>
+        {errorMsg ? (
+          <p className="text-red-600 dark:text-red-400">Falha ao atualizar: {errorMsg}</p>
+        ) : isDownloaded ? (
+          <p>A versão {update?.version} foi baixada e está pronta para ser instalada.</p>
         ) : isDownloading ? (
           <>
-            <p>Baixando versão {updateInfo?.version}...</p>
+            <p>Baixando versão {update?.version}...</p>
             <ProgressBar progress={downloadProgress} />
             <p className="text-xs text-center">{Math.round(downloadProgress)}%</p>
           </>
         ) : (
-          <p>Uma nova versão do {APP_TITLE} está disponível: ({updateInfo?.version})</p>
+          <p>Uma nova versão do {APP_TITLE} está disponível: ({update?.version})</p>
         )}
       </div>
 

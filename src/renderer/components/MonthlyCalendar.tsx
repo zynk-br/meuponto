@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { MonthlySchedule, MonthlyDayEntry } from '../types';
 
 interface MonthlyCalendarProps {
@@ -93,7 +93,7 @@ const MonthlyCalendar: React.FC<MonthlyCalendarProps> = ({ monthlySchedule, onUp
                 onChange={(e) => onUpdateDay(dateKey, { ...dayEntry, entrada1: e.target.value })}
                 disabled={readonly}
                 placeholder="E1"
-                className="w-full px-1 py-0.5 text-xs border rounded bg-white dark:bg-secondary-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 disabled:opacity-50"
+                className={`w-full px-1 py-0.5 text-xs border rounded ${readonly ? 'bg-secondary-200 dark:bg-secondary-900 border-secondary-400 dark:border-secondary-700 cursor-not-allowed opacity-70' : 'bg-transparent border-gray-300 dark:border-gray-600'}`}
               />
               <input
                 type="time"
@@ -101,7 +101,8 @@ const MonthlyCalendar: React.FC<MonthlyCalendarProps> = ({ monthlySchedule, onUp
                 onChange={(e) => onUpdateDay(dateKey, { ...dayEntry, saida1: e.target.value })}
                 disabled={readonly || (preAssignedInterval === true)}
                 placeholder="S1"
-                className={`w-full px-1 py-0.5 text-xs border rounded bg-white dark:bg-secondary-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 disabled:opacity-50 ${preAssignedInterval ? 'cursor-not-allowed bg-gray-100 dark:bg-gray-800 text-gray-500' : ''}`}
+                title={preAssignedInterval ? 'Intervalo pré-assinalado (fixo)' : undefined}
+                className={`w-full px-1 py-0.5 text-xs border rounded ${preAssignedInterval ? 'bg-secondary-200 dark:bg-secondary-900 border-secondary-400 dark:border-secondary-700 cursor-not-allowed opacity-70' : readonly ? 'bg-secondary-200 dark:bg-secondary-900 border-secondary-400 dark:border-secondary-700 cursor-not-allowed opacity-70' : 'bg-transparent border-gray-300 dark:border-gray-600'}`}
               />
               <input
                 type="time"
@@ -109,7 +110,8 @@ const MonthlyCalendar: React.FC<MonthlyCalendarProps> = ({ monthlySchedule, onUp
                 onChange={(e) => onUpdateDay(dateKey, { ...dayEntry, entrada2: e.target.value })}
                 disabled={readonly || (preAssignedInterval === true)}
                 placeholder="E2"
-                className={`w-full px-1 py-0.5 text-xs border rounded bg-white dark:bg-secondary-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 disabled:opacity-50 ${preAssignedInterval ? 'cursor-not-allowed bg-gray-100 dark:bg-gray-800 text-gray-500' : ''}`}
+                title={preAssignedInterval ? 'Intervalo pré-assinalado (fixo)' : undefined}
+                className={`w-full px-1 py-0.5 text-xs border rounded ${preAssignedInterval ? 'bg-secondary-200 dark:bg-secondary-900 border-secondary-400 dark:border-secondary-700 cursor-not-allowed opacity-70' : readonly ? 'bg-secondary-200 dark:bg-secondary-900 border-secondary-400 dark:border-secondary-700 cursor-not-allowed opacity-70' : 'bg-transparent border-gray-300 dark:border-gray-600'}`}
               />
               <input
                 type="time"
@@ -117,7 +119,7 @@ const MonthlyCalendar: React.FC<MonthlyCalendarProps> = ({ monthlySchedule, onUp
                 onChange={(e) => onUpdateDay(dateKey, { ...dayEntry, saida2: e.target.value })}
                 disabled={readonly}
                 placeholder="S2"
-                className="w-full px-1 py-0.5 text-xs border rounded bg-white dark:bg-secondary-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 disabled:opacity-50"
+                className={`w-full px-1 py-0.5 text-xs border rounded ${readonly ? 'bg-secondary-200 dark:bg-secondary-900 border-secondary-400 dark:border-secondary-700 cursor-not-allowed opacity-70' : 'bg-transparent border-gray-300 dark:border-gray-600'}`}
               />
             </div>
           )}

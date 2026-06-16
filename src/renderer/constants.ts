@@ -1,16 +1,15 @@
-// Arquivo agora em: src/renderer/constants.ts
-import { Settings, BrowserStatus, View, DayOfWeek, TimeEntry, Schedule, LogLevel, AutomationMode } from './types'; // Ajustado
+import { Settings, BrowserStatus, View, DayOfWeek, TimeEntry, Schedule, LogLevel, AutomationMode } from './types';
 
 export const INITIAL_SETTINGS: Settings = {
   telegramChatId: '',
+  telegramBotToken: '',
   showLogConsole: true,
-  automationBrowserStatus: BrowserStatus.LOADING, 
   theme: 'light',
   saveLoginDetails: false,
   savedFolha: '',
 };
 
-export const INITIAL_VIEW: View = View.LOADING_PREREQUISITES;
+export const INITIAL_VIEW: View = View.LOADING;
 
 export const DAYS_OF_WEEK: DayOfWeek[] = [
   DayOfWeek.MONDAY,
@@ -43,9 +42,7 @@ export const LOG_LEVEL_COLORS: Record<LogLevel, string> = {
 
 export const INITIAL_AUTOMATION_MODE = AutomationMode.WEEKLY_MANUAL;
 
-export const NODE_DOWNLOAD_URL = "https://nodejs.org/";
-export const HOMEBREW_INSTALL_COMMAND = "/bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"";
-export const HOMEBREW_NODE_INSTALL_COMMAND = "brew install node";
-
 export const APP_TITLE = "Meu Ponto";
 export const KEYTAR_ACCOUNT_PREFIX = "user_";
+
+export const MAX_LOG_ENTRIES = 500;

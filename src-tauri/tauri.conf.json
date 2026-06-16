@@ -1,0 +1,62 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicegui/tauri-v2-releases/main/v2-schema.json",
+  "productName": "Meu Ponto",
+  "version": "3.0.0",
+  "identifier": "com.zynk.meuponto",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev:frontend",
+    "beforeBuildCommand": "npm run build:frontend"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "Meu Ponto",
+        "width": 1100,
+        "height": 1000,
+        "minWidth": 1000,
+        "minHeight": 900,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "copyright": "Copyright © 2025 Zynk Tech",
+    "category": "Utility",
+    "macOS": {
+      "minimumSystemVersion": "10.15",
+      "signingIdentity": null,
+      "entitlements": null
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJBQjFBMjRFNThBQ0NCRTYKUldUbXk2eFlUcUt4S25nbWZsUGpzUVVyWCtKa1JRSEt5SkhUWHVIRkxiY2tRcjh1ejNsYTV1L3QK",
+      "endpoints": [
+        "https://github.com/zynk-br/meuponto/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

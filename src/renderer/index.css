@@ -16,3 +16,36 @@ body {
 .no-drag-region {
   -webkit-app-region: no-drag;
 }
+
+/* O WebKit (WKWebView no macOS) deixa o texto do input[type=time] ilegível,
+   inclusive em campos desabilitados (usa -webkit-text-fill-color, que tem
+   precedência sobre `color`). Forçamos os dois para manter tudo legível,
+   como na versão Electron. */
+input[type="time"] {
+  color: #1e293b;
+  -webkit-text-fill-color: #1e293b; /* tema claro */
+}
+.dark input[type="time"] {
+  color: #e2e8f0;
+  -webkit-text-fill-color: #e2e8f0; /* tema escuro */
+}
+input[type="time"]::-webkit-datetime-edit {
+  color: inherit;
+  -webkit-text-fill-color: inherit;
+}
+/* Desabilitados (pré-assinalação): legíveis, mas levemente mais suaves. */
+.dark input[type="time"]:disabled {
+  color: #cbd5e1;
+  -webkit-text-fill-color: #cbd5e1; /* secondary-300 */
+  opacity: 1;
+}
+input[type="time"]:disabled {
+  color: #475569;
+  -webkit-text-fill-color: #475569;
+  opacity: 1;
+}
+
+/* Ícone do seletor de horário legível no tema escuro */
+.dark input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.85);
+}

@@ -1,97 +1,54 @@
 {
   "name": "meu-ponto",
-  "version": "2.0.33",
+  "version": "3.0.0",
   "description": "Automatizador de ponto",
-  "main": "./out/electron/main.js",
   "author": {
     "name": "Zynk Tech",
     "email": "douglas@zynk.com.br",
     "url": "https://zynk.com.br"
   },
   "license": "ISC",
+  "type": "module",
   "scripts": {
-    "start": "electron-vite preview",
-    "dev": "electron-vite dev",
-    "build": "electron-vite build && electron-builder",
-    "build:win": "npm run build -- -w --x64 --arm64 -p always",
-    "build:mac": "npm run build -- -m --x64 --arm64 -p always",
-    "build:win-local": "npm run build -- -w --x64 --arm64",
-    "build:mac-local": "npm run build -- -m --x64 --arm64",
-    "postinstall": "electron-builder install-app-deps"
+    "dev:frontend": "vite",
+    "build:frontend": "vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build"
   },
   "dependencies": {
-    "electron-store": "8.2.0",
-    "electron-updater": "^6.6.2",
-    "form-data": "^4.0.4",
-    "ical-generator": "^9.0.0",
-    "keytar": "^7.9.0",
-    "playwright": "^1.56.1"
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-autostart": "^2.5.1",
+    "@tauri-apps/plugin-dialog": "^2",
+    "@tauri-apps/plugin-notification": "^2",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-shell": "^2",
+    "@tauri-apps/plugin-store": "^2",
+    "@tauri-apps/plugin-updater": "^2.10.1",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
   },
   "devDependencies": {
-    "@electron-toolkit/preload": "^3.0.2",
+    "@tauri-apps/cli": "^2.11.2",
     "@types/react": "^19.2.4",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.22",
-    "electron": "^33.2.0",
-    "electron-builder": "^26.0.12",
-    "electron-vite": "^4.0.1",
     "postcss": "^8.4.38",
-    "puppeteer-extra-plugin-stealth": "^2.11.2",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
     "tailwindcss": "^3.4.4",
-    "vite": "^7.2.2"
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
   },
-  "build": {
-    "appId": "com.zynk.meuponto",
-    "productName": "Meu Ponto",
-    "copyright": "Copyright © 2025 ${author}",
-    "directories": {
-      "output": "release/",
-      "buildResources": "assets/build"
-    },
-    "asarUnpack": [
-      "**/node_modules/playwright/**",
-      "**/node_modules/playwright-core/**",
-      "**/node_modules/keytar/**"
-    ],
-    "files": [
-      "out/**",
-      "package.json"
-    ],
-    "publish": {
-      "provider": "github",
-      "owner": "zynk-br",
-      "repo": "meuponto"
-    },
-    "mac": {
-      "icon": "assets/build/icon.icns",
-      "target": [
-        "dmg",
-        "zip"
-      ],
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false,
-      "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist"
-    },
-    "dmg": {
-      "sign": false
-    },
-    "win": {
-      "icon": "assets/build/icon.png",
-      "target": [
-        "nsis",
-        "zip"
-      ]
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "perMachine": false,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
-    }
+  "optionalDependencies": {
+    "@rollup/rollup-darwin-arm64": "4.62.0",
+    "@rollup/rollup-darwin-x64": "4.62.0",
+    "@rollup/rollup-win32-x64-msvc": "4.62.0",
+    "@esbuild/darwin-arm64": "0.25.12",
+    "@esbuild/darwin-x64": "0.25.12",
+    "@esbuild/win32-x64": "0.25.12",
+    "@tauri-apps/cli-darwin-arm64": "2.11.2",
+    "@tauri-apps/cli-darwin-x64": "2.11.2",
+    "@tauri-apps/cli-win32-x64-msvc": "2.11.2"
   }
 }

@@ -1,9 +1,10 @@
-// Arquivo agora em: src/renderer/views/AppView.tsx
 import React, { useState, useCallback, useEffect } from 'react';
-import { useAppContext } from '../hooks/useAppContext'; // Ajustado
-import { DayOfWeek, LogLevel, TimeEntry, Schedule, AutomationMode, BrowserStatus, MonthlySchedule, MonthlyDayEntry } from '../types'; // Ajustado
-import { DAYS_OF_WEEK } from '../constants'; // Ajustado
+import { useAppContext } from '../hooks/useAppContext';
+import { DayOfWeek, LogLevel, TimeEntry, Schedule, AutomationMode, MonthlySchedule, MonthlyDayEntry } from '../types';
+import { DAYS_OF_WEEK } from '../constants';
 import MonthlyCalendar from '../components/MonthlyCalendar';
+import ConfirmDialog from '../components/ConfirmDialog';
+import * as tauriAPI from '../hooks/useTauriAPI';
 
 const DayRowEditor: React.FC<{ day: DayOfWeek, entry: TimeEntry, onChange: (newEntry: TimeEntry) => void, readonly: boolean, preAssignedInterval?: boolean }> = ({ day, entry, onChange, readonly, preAssignedInterval }) => {
 
@@ -44,22 +45,31 @@ const DayRowEditor: React.FC<{ day: DayOfWeek, entry: TimeEntry, onChange: (newE
   return (
     <tr className="border-b border-secondary-200 dark:border-secondary-700 hover:bg-secondary-50 dark:hover:bg-secondary-800 transition-colors">
       <td className="py-3 px-4 text-sm font-medium text-secondary-800 dark:text-secondary-200">{day}</td>
-      {['entrada1', 'saida1', 'entrada2', 'saida2'].map((field) => (
-        <td key={field} className="py-2 px-3">
-          <input
-            type="time"
-            value={
-              (preAssignedInterval && field === 'saida1') ? '12:00' :
-                (preAssignedInterval && field === 'entrada2') ? '13:00' :
-                  entry[field as keyof Omit<TimeEntry, 'feriado'>]
-            }
-            onChange={(e) => handleTimeChange(field as keyof Omit<TimeEntry, 'feriado'>, e.target.value)}
-            disabled={entry.feriado || readonly || (preAssignedInterval && (field === 'saida1' || field === 'entrada2'))}
-            readOnly={readonly}
-            className={`w-full p-2 border rounded-md text-sm bg-white dark:bg-secondary-700 text-secondary-700 dark:text-secondary-200 border-secondary-300 dark:border-secondary-600 focus:ring-primary-500 focus:border-primary-500 ${(entry.feriado || readonly || (preAssignedInterval && (field === 'saida1' || field === 'entrada2'))) ? 'bg-secondary-100 dark:bg-secondary-800 cursor-not-allowed text-secondary-400' : ''}`}
-          />
-        </td>
-      ))}
+      {['entrada1', 'saida1', 'entrada2', 'saida2'].map((field) => {
+        const isPreAssigned = preAssignedInterval && (field === 'saida1' || field === 'entrada2');
+        const isDisabled = entry.feriado || readonly || isPreAssigned;
+        return (
+          <td key={field} className="py-2 px-3">
+            <input
+              type="time"
+              value={
+                isPreAssigned
+                  ? (field === 'saida1' ? '12:00' : '13:00')
+                  : entry[field as keyof Omit<TimeEntry, 'feriado'>]
+              }
+              onChange={(e) => handleTimeChange(field as keyof Omit<TimeEntry, 'feriado'>, e.target.value)}
+              disabled={isDisabled}
+              readOnly={readonly}
+              title={isPreAssigned ? 'Intervalo pré-assinalado (fixo)' : undefined}
+              className={`w-full p-2 border rounded-md text-sm focus:ring-primary-500 focus:border-primary-500 ${(isPreAssigned || entry.feriado)
+                ? 'bg-secondary-200 dark:bg-secondary-900 border-secondary-400 dark:border-secondary-700 cursor-not-allowed opacity-70'
+                : readonly
+                  ? 'bg-transparent border-secondary-300 dark:border-secondary-600 cursor-not-allowed'
+                  : 'bg-transparent border-secondary-300 dark:border-secondary-600'}`}
+            />
+          </td>
+        );
+      })}
       <td className="py-3 px-4 text-center">
         <input
           type="checkbox"
@@ -125,16 +135,8 @@ const AppView: React.FC = () => {
                 const newValue = e.target.checked;
                 const currentConfig = settings.preAssignedIntervalConfig || {};
                 const newConfig = { ...currentConfig, [mode]: newValue };
-
-                if (newValue) {
-                  if (window.confirm(`Ao ativar para ${mode}, os campos de Saída 1 e Entrada 2 serão bloqueados e ignorados (12:00-13:00 fixo). Continuar?`)) {
-                    updateSettings({ preAssignedIntervalConfig: newConfig });
-                    addLog(LogLevel.INFO, `Pré-assinalação de intervalo ativada para ${mode}.`);
-                  }
-                } else {
-                  updateSettings({ preAssignedIntervalConfig: newConfig });
-                  addLog(LogLevel.INFO, `Pré-assinalação de intervalo desativada para ${mode}.`);
-                }
+                updateSettings({ preAssignedIntervalConfig: newConfig });
+                addLog(LogLevel.INFO, `Pré-assinalação de intervalo ${newValue ? 'ativada' : 'desativada'} para ${mode}.`);
               }}
             />
             <div className="w-11 h-6 bg-secondary-200 dark:bg-secondary-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-secondary-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600 peer-disabled:opacity-50"></div>
@@ -429,15 +431,9 @@ const AppView: React.FC = () => {
     return weeklySchedule;
   };
 
-  const handleExecute = () => {
+  const handleExecute = (dryRun = false) => {
     if (!currentUserCredentials || !currentUserCredentials.folha || !currentUserCredentials.senha) {
       addLog(LogLevel.ERROR, "Credenciais do usuário não encontradas. Faça login novamente.");
-      alert("Erro: Credenciais não encontradas. Por favor, faça login novamente.");
-      return;
-    }
-    if (settings.automationBrowserStatus !== BrowserStatus.OK) {
-      addLog(LogLevel.ERROR, "Navegador de automação não está pronto. Verifique as configurações.");
-      alert("Erro: O navegador de automação não está pronto. Verifique o status nas Configurações.");
       return;
     }
 
@@ -448,90 +444,114 @@ const AppView: React.FC = () => {
     } else if (automationMode === AutomationMode.WEEKLY_AUTO) {
       scheduleToUse = weeklyAutoSchedule;
     } else {
-      // Para MONTHLY_AUTO, converte para formato semanal (usa horários do dia atual do mês)
       scheduleToUse = convertMonthlyToWeeklySchedule(monthlyAutoSchedule);
     }
 
-    addLog(LogLevel.INFO, `Solicitando início da automação no modo: ${automationMode}`);
-    if (window.electronAPI) {
-      // Create a temporary settings object with the specific flag for the current mode resolved to a boolean
-      const effectiveSettings = {
-        ...settings,
-        preAssignedInterval: settings.preAssignedIntervalConfig?.[automationMode] || false
+    // Validar horários antes de iniciar (fix bug #15)
+    const preAssigned = settings.preAssignedIntervalConfig?.[automationMode] || false;
+    for (const [day, entry] of Object.entries(scheduleToUse)) {
+      if (entry.feriado || !entry.entrada1) continue;
+      const parseMin = (t: string) => {
+        const [h, m] = t.split(':').map(Number);
+        return h * 60 + m;
       };
-
-      window.electronAPI.startAutomation({
-        schedule: scheduleToUse,
-        credentials: currentUserCredentials,
-        settings: effectiveSettings
-      });
-    } else {
-      addLog(LogLevel.ERROR, "Electron API não disponível para iniciar automação.");
+      const e1 = parseMin(entry.entrada1);
+      const s2 = parseMin(entry.saida2);
+      if (!preAssigned) {
+        const s1 = parseMin(entry.saida1);
+        const e2 = parseMin(entry.entrada2);
+        if (e1 >= s1 || s1 >= e2 || e2 >= s2) {
+          addLog(LogLevel.ERROR, `Horários inválidos em ${day}: os horários devem ser E1 < S1 < E2 < S2.`);
+          return;
+        }
+      } else {
+        if (e1 >= s2) {
+          addLog(LogLevel.ERROR, `Horários inválidos em ${day}: Entrada 1 deve ser antes da Saída 2.`);
+          return;
+        }
+      }
     }
+
+    addLog(
+      LogLevel.INFO,
+      dryRun
+        ? `Iniciando SIMULAÇÃO (dry-run) no modo: ${automationMode} — nada será registrado de verdade.`
+        : `Solicitando início da automação no modo: ${automationMode}`
+    );
+    const effectiveSettings = {
+      ...settings,
+      preAssignedInterval: settings.preAssignedIntervalConfig?.[automationMode] || false
+    };
+
+    tauriAPI.startAutomation({
+      schedule: scheduleToUse,
+      credentials: currentUserCredentials,
+      settings: effectiveSettings,
+      dryRun
+    }).catch(err => {
+      addLog(LogLevel.ERROR, `Erro ao ${dryRun ? 'simular' : 'iniciar'} automação: ${err}`);
+    });
   };
 
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+
   const handleClear = () => {
-    if (window.confirm("Tem certeza que deseja limpar todos os horários da grade?")) {
-      // Limpa o schedule específico do modo ativo
-      if (automationMode === AutomationMode.WEEKLY_MANUAL) {
-        setWeeklyManualSchedule({
-          [DayOfWeek.MONDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
-          [DayOfWeek.TUESDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
-          [DayOfWeek.WEDNESDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
-          [DayOfWeek.THURSDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
-          [DayOfWeek.FRIDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
-        });
-      } else if (automationMode === AutomationMode.WEEKLY_AUTO) {
-        setWeeklyAutoSchedule({
-          [DayOfWeek.MONDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
-          [DayOfWeek.TUESDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
-          [DayOfWeek.WEDNESDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
-          [DayOfWeek.THURSDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
-          [DayOfWeek.FRIDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
-        });
-      } else if (automationMode === AutomationMode.MONTHLY_AUTO) {
-        setMonthlyAutoSchedule({});
-      }
-      addLog(LogLevel.WARNING, `Todos os horários do modo ${automationMode} foram limpos pelo usuário.`);
+    setShowClearConfirm(true);
+  };
+
+  const confirmClear = () => {
+    const emptyEntry = { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false };
+    if (automationMode === AutomationMode.WEEKLY_MANUAL) {
+      setWeeklyManualSchedule({
+        [DayOfWeek.MONDAY]: { ...emptyEntry },
+        [DayOfWeek.TUESDAY]: { ...emptyEntry },
+        [DayOfWeek.WEDNESDAY]: { ...emptyEntry },
+        [DayOfWeek.THURSDAY]: { ...emptyEntry },
+        [DayOfWeek.FRIDAY]: { ...emptyEntry },
+      });
+    } else if (automationMode === AutomationMode.WEEKLY_AUTO) {
+      setWeeklyAutoSchedule({
+        [DayOfWeek.MONDAY]: { ...emptyEntry },
+        [DayOfWeek.TUESDAY]: { ...emptyEntry },
+        [DayOfWeek.WEDNESDAY]: { ...emptyEntry },
+        [DayOfWeek.THURSDAY]: { ...emptyEntry },
+        [DayOfWeek.FRIDAY]: { ...emptyEntry },
+      });
+    } else if (automationMode === AutomationMode.MONTHLY_AUTO) {
+      setMonthlyAutoSchedule({});
     }
+    addLog(LogLevel.WARNING, `Todos os horários do modo ${automationMode} foram limpos pelo usuário.`);
+    setShowClearConfirm(false);
   };
 
   const handleInterrupt = () => {
     addLog(LogLevel.INFO, "Solicitando interrupção da automação.");
-    if (window.electronAPI) {
-      window.electronAPI.stopAutomation();
-    } else {
-      addLog(LogLevel.ERROR, "Electron API não disponível para interromper automação.");
-    }
+    tauriAPI.stopAutomation().catch(err => {
+      addLog(LogLevel.ERROR, `Erro ao interromper automação: ${err}`);
+    });
   };
 
   const handleExportCalendar = async () => {
     addLog(LogLevel.INFO, "Exportando horários para calendário...");
 
-    // Determina qual schedule usar baseado no modo ativo
     let scheduleToExport: Schedule;
     if (automationMode === AutomationMode.WEEKLY_MANUAL) {
       scheduleToExport = weeklyManualSchedule;
     } else if (automationMode === AutomationMode.WEEKLY_AUTO) {
       scheduleToExport = weeklyAutoSchedule;
     } else {
-      // Para MONTHLY_AUTO, converte para formato semanal
       scheduleToExport = convertMonthlyToWeeklySchedule(monthlyAutoSchedule);
     }
 
-    if (window.electronAPI) {
-      try {
-        const result = await window.electronAPI.exportCalendar(scheduleToExport);
-        if (result.success) {
-          addLog(LogLevel.SUCCESS, `Calendário exportado com sucesso: ${result.path}`);
-        } else {
-          addLog(LogLevel.ERROR, `Falha ao exportar calendário: ${result.error}`);
-        }
-      } catch (error) {
-        addLog(LogLevel.ERROR, `Erro ao exportar calendário: ${error}`);
+    try {
+      const result = await tauriAPI.exportCalendar(scheduleToExport);
+      if (result.success) {
+        addLog(LogLevel.SUCCESS, `Calendário exportado com sucesso: ${result.path}`);
+      } else {
+        addLog(LogLevel.ERROR, `Falha ao exportar calendário: ${result.error}`);
       }
-    } else {
-      addLog(LogLevel.ERROR, "Electron API não disponível para exportar calendário.");
+    } catch (error) {
+      addLog(LogLevel.ERROR, `Erro ao exportar calendário: ${error}`);
     }
   };
 
@@ -752,9 +772,9 @@ const AppView: React.FC = () => {
         </div>
         <div className="flex flex-wrap gap-3">
           <button
-            onClick={handleExecute}
-            disabled={automationState.isRunning || settings.automationBrowserStatus !== BrowserStatus.OK}
-            title={settings.automationBrowserStatus !== BrowserStatus.OK ? "Navegador de automação não está pronto. Verifique as Configurações." : "Iniciar Automação"}
+            onClick={() => handleExecute(false)}
+            disabled={automationState.isRunning}
+            title="Iniciar Automação"
             className="px-6 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 flex items-center"
           >
             <i className="fas fa-play mr-2"></i> Executar
@@ -775,7 +795,18 @@ const AppView: React.FC = () => {
           </button>
         </div>
       </div>
-    </div >
+
+      <ConfirmDialog
+        isOpen={showClearConfirm}
+        title="Limpar Grade"
+        message="Tem certeza que deseja limpar todos os horários da grade?"
+        confirmText="Limpar"
+        cancelText="Cancelar"
+        variant="danger"
+        onConfirm={confirmClear}
+        onCancel={() => setShowClearConfirm(false)}
+      />
+    </div>
   );
 };
 
