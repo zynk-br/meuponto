@@ -39,6 +39,12 @@ pub struct AutomationConfig {
     pub telegram_bot_token: Option<String>,
     pub telegram_chat_id: Option<String>,
     pub pre_assigned_interval: bool,
+    /// Modo simulação: percorre o dia sem registrar ponto de verdade.
+    #[serde(default)]
+    pub dry_run: bool,
+    /// (Dry-run) força a falha de uma batida para exercitar o reagendamento.
+    #[serde(default)]
+    pub simulate_failure: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -137,8 +143,12 @@ async fn run_automation_loop(
     let (mut browser_instance, handler) = browser::launch_browser(chromium_path).await?;
     emit_log(app, "SUCESSO", "Navegador iniciado com sucesso.");
 
-    // Step 3: Main automation loop
-    let result = automation_heartbeat_loop(app, &browser_instance, config, cancel_token).await;
+    // Step 3: Main loop — simulação (one-shot) ou automação real (perpétua)
+    let result = if config.dry_run {
+        simulate_day(app, &browser_instance, config, cancel_token).await
+    } else {
+        automation_heartbeat_loop(app, &browser_instance, config, cancel_token).await
+    };
 
     // Cleanup: close browser
     emit_log(app, "INFO", "Fechando navegador...");
@@ -356,7 +366,7 @@ fn load_or_build_plan(
 ) -> Option<DayPlan> {
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
 
-    if let Some(plan) = DayPlan::load(app) {
+    if let Some(plan) = DayPlan::load(app, config.dry_run) {
         if plan.date == today && plan.pre_assigned_interval == config.pre_assigned_interval {
             return Some(plan);
         }
@@ -366,8 +376,120 @@ fn load_or_build_plan(
         &config.schedule,
         existing_points,
         config.pre_assigned_interval,
-        false,
+        config.dry_run,
     )
+}
+
+/// Simulação one-shot do dia (dry-run): login + sync reais (read-only), monta o
+/// plano com anchoring e percorre as batidas em tempo comprimido, simulando
+/// sucesso/falha — sem nunca clicar em registrar. Notifica no Telegram com
+/// prefixo [SIMULAÇÃO]. Persiste sob a chave dayPlanDryRun (descartável).
+async fn simulate_day(
+    app: &AppHandle,
+    browser: &chromiumoxide::browser::Browser,
+    config: &AutomationConfig,
+    cancel_token: &CancellationToken,
+) -> Result<(), String> {
+    const PFX: &str = "[SIMULAÇÃO] ";
+    emit_log(app, "INFO", &format!("{PFX}Iniciando simulação do dia — nenhum ponto será registrado de verdade."));
+    emit_status(app, true, "Simulação: sincronizando pontos...", Some("Dry-run"));
+
+    // 1. Login + sync reais (read-only). Se o portal falhar, simula sem pontos.
+    let existing_points = match portal::login_to_portal(browser, app, &config.folha, &config.senha).await {
+        Ok(page) => {
+            let pts = portal::sync_initial_points(&page, app).await.unwrap_or_default();
+            let _ = page.close().await;
+            pts
+        }
+        Err(e) => {
+            emit_log(app, "AVISO", &format!("{PFX}Sem acesso ao portal ({e}); simulando sem pontos já registrados."));
+            Vec::new()
+        }
+    };
+
+    if cancel_token.is_cancelled() {
+        return Ok(());
+    }
+
+    // 2. Monta o plano-do-dia (dry-run) com anchoring e reconcilia.
+    let mut plan = match DayPlan::build_for_today(
+        &config.schedule,
+        &existing_points,
+        config.pre_assigned_interval,
+        true,
+    ) {
+        Some(p) => p,
+        None => {
+            emit_log(app, "INFO", &format!("{PFX}Hoje não há batidas (fim de semana/feriado/sem agenda)."));
+            return Ok(());
+        }
+    };
+    plan.reconcile(&existing_points, &chrono::Local::now().to_rfc3339());
+    let _ = plan.save(app);
+
+    if plan.invalid {
+        emit_log(app, "AVISO", &format!("{PFX}Dia inválido: {}", plan.invalid_reason.clone().unwrap_or_default()));
+        return Ok(());
+    }
+
+    // 3. Percorre o plano em tempo comprimido.
+    let mut injection_consumed = false;
+    let mut guard = 0;
+    while let Some(idx) = plan.next_actionable() {
+        if cancel_token.is_cancelled() {
+            return Ok(());
+        }
+        guard += 1;
+        if guard > 30 {
+            emit_log(app, "AVISO", &format!("{PFX}Limite de iterações atingido; encerrando simulação."));
+            break;
+        }
+
+        let punch = plan.punches[idx].clone();
+        emit_status(app, true, &format!("Simulando {} @ {}", punch.punch_type, punch.planned_time), Some("Dry-run"));
+        emit_log(
+            app,
+            "INFO",
+            &format!("{PFX}Próxima batida: {} @ {} (agenda: {})", punch.punch_type, punch.planned_time, punch.original_time),
+        );
+        wait_or_cancel(cancel_token, std::time::Duration::from_millis(1500)).await;
+
+        let inject = config.simulate_failure.as_deref() == Some(punch.punch_type.as_str()) && !injection_consumed;
+        if inject {
+            injection_consumed = true;
+            for attempt in 1..=MAX_PUNCH_RETRIES {
+                plan.record_attempt(idx, Some("falha injetada".into()));
+                emit_log(app, "AVISO", &format!("{PFX}Tentativa {attempt}/{MAX_PUNCH_RETRIES} de {} falhou (injetada).", punch.punch_type));
+                wait_or_cancel(cancel_token, std::time::Duration::from_millis(500)).await;
+            }
+            plan.mark_failed(idx, Some("falha injetada".into()));
+            notify(app, config, &format!("{PFX}🔴 Falha simulada em {} após {MAX_PUNCH_RETRIES} tentativas.", punch.punch_type)).await;
+
+            plan.apply_reschedule(&punch.punch_type, RESCHEDULE_DELAY_MIN, &existing_points);
+            let novos: Vec<String> = plan.punches.iter().filter(|p| p.status != PunchStatus::Registered).map(|p| format!("{} → {}", p.punch_type, p.planned_time)).collect();
+            emit_log(app, "AVISO", &format!("{PFX}Reagendado (+{RESCHEDULE_DELAY_MIN}min): {}", novos.join(", ")));
+            notify(app, config, &format!("{PFX}⏰ Reagendei. Novos horários: {}", novos.join(", "))).await;
+            let _ = plan.save(app);
+            continue;
+        }
+
+        // Sucesso simulado.
+        plan.mark_registered(idx, &chrono::Local::now().to_rfc3339());
+        emit_log(app, "SUCESSO", &format!("{PFX}Registraria {} @ {} agora.", punch.punch_type, punch.planned_time));
+        notify(app, config, &format!("{PFX}✅ Ponto {} às {} registrado (simulado).", punch.punch_type, punch.planned_time)).await;
+        let _ = plan.save(app);
+    }
+
+    // 4. Resumo.
+    let resumo: Vec<String> = plan
+        .punches
+        .iter()
+        .map(|p| format!("{} {} [{:?}]", p.punch_type, p.planned_time, p.status))
+        .collect();
+    emit_log(app, "SUCESSO", &format!("{PFX}Simulação concluída. Plano final: {}", resumo.join(" | ")));
+    emit_status(app, true, "Simulação concluída.", None);
+    notify(app, config, &format!("{PFX}📋 Simulação do dia concluída: {}", resumo.join(", "))).await;
+    Ok(())
 }
 
 /// Sem batida acionável hoje: usa o lookahead multi-dia para esperar até a

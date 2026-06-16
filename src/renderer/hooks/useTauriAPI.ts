@@ -56,6 +56,8 @@ export async function startAutomation(data: {
   schedule: Schedule;
   credentials: UserCredentials;
   settings: Settings;
+  dryRun?: boolean;
+  simulateFailure?: string;
 }): Promise<void> {
   await invoke('start_automation', { data });
 }

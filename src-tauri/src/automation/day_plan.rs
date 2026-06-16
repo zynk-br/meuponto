@@ -14,6 +14,17 @@ use crate::automation::portal::parse_time_minutes;
 
 const STORE_FILENAME: &str = "settings.json";
 const DAY_PLAN_KEY: &str = "dayPlan";
+const DAY_PLAN_DRY_KEY: &str = "dayPlanDryRun";
+
+/// Chave de persistência conforme o modo (real x simulação), para que o
+/// dry-run nunca contamine o plano real (usado na recuperação ao reiniciar).
+fn store_key(dry_run: bool) -> &'static str {
+    if dry_run {
+        DAY_PLAN_DRY_KEY
+    } else {
+        DAY_PLAN_KEY
+    }
+}
 
 /// Tolerância (em minutos) para casar uma batida planejada com um ponto real.
 pub const TOLERANCE_MINUTES: i32 = 5;
@@ -310,22 +321,22 @@ impl DayPlan {
 
     // ---- Persistência (tauri-plugin-store, chave `dayPlan`) ----
 
-    pub fn load(app: &AppHandle) -> Option<DayPlan> {
+    pub fn load(app: &AppHandle, dry_run: bool) -> Option<DayPlan> {
         let store = app.store(STORE_FILENAME).ok()?;
-        let val = store.get(DAY_PLAN_KEY)?;
+        let val = store.get(store_key(dry_run))?;
         serde_json::from_value(val).ok()
     }
 
     pub fn save(&self, app: &AppHandle) -> Result<(), String> {
         let store = app.store(STORE_FILENAME).map_err(|e| e.to_string())?;
         let val = serde_json::to_value(self).map_err(|e| e.to_string())?;
-        store.set(DAY_PLAN_KEY, val);
+        store.set(store_key(self.dry_run), val);
         store.save().map_err(|e| e.to_string())
     }
 
-    pub fn clear(app: &AppHandle) -> Result<(), String> {
+    pub fn clear(app: &AppHandle, dry_run: bool) -> Result<(), String> {
         let store = app.store(STORE_FILENAME).map_err(|e| e.to_string())?;
-        store.delete(DAY_PLAN_KEY);
+        store.delete(store_key(dry_run));
         store.save().map_err(|e| e.to_string())
     }
 }

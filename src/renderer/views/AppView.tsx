@@ -422,7 +422,7 @@ const AppView: React.FC = () => {
     return weeklySchedule;
   };
 
-  const handleExecute = () => {
+  const handleExecute = (dryRun = false) => {
     if (!currentUserCredentials || !currentUserCredentials.folha || !currentUserCredentials.senha) {
       addLog(LogLevel.ERROR, "Credenciais do usuário não encontradas. Faça login novamente.");
       return;
@@ -463,7 +463,12 @@ const AppView: React.FC = () => {
       }
     }
 
-    addLog(LogLevel.INFO, `Solicitando início da automação no modo: ${automationMode}`);
+    addLog(
+      LogLevel.INFO,
+      dryRun
+        ? `Iniciando SIMULAÇÃO (dry-run) no modo: ${automationMode} — nada será registrado de verdade.`
+        : `Solicitando início da automação no modo: ${automationMode}`
+    );
     const effectiveSettings = {
       ...settings,
       preAssignedInterval: settings.preAssignedIntervalConfig?.[automationMode] || false
@@ -472,9 +477,10 @@ const AppView: React.FC = () => {
     tauriAPI.startAutomation({
       schedule: scheduleToUse,
       credentials: currentUserCredentials,
-      settings: effectiveSettings
+      settings: effectiveSettings,
+      dryRun
     }).catch(err => {
-      addLog(LogLevel.ERROR, `Erro ao iniciar automação: ${err}`);
+      addLog(LogLevel.ERROR, `Erro ao ${dryRun ? 'simular' : 'iniciar'} automação: ${err}`);
     });
   };
 
@@ -787,12 +793,20 @@ const AppView: React.FC = () => {
         </div>
         <div className="flex flex-wrap gap-3">
           <button
-            onClick={handleExecute}
+            onClick={() => handleExecute(false)}
             disabled={automationState.isRunning}
             title="Iniciar Automação"
             className="px-6 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 flex items-center"
           >
             <i className="fas fa-play mr-2"></i> Executar
+          </button>
+          <button
+            onClick={() => handleExecute(true)}
+            disabled={automationState.isRunning}
+            title="Simular o dia (dry-run): percorre o plano sem registrar ponto de verdade"
+            className="px-6 py-2 bg-purple-600 hover:bg-purple-700 text-white font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50 flex items-center"
+          >
+            <i className="fas fa-flask mr-2"></i> Simular
           </button>
           <button
             onClick={handleClear}

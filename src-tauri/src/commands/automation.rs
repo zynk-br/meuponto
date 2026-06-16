@@ -11,6 +11,12 @@ pub struct AutomationRequest {
     pub schedule: serde_json::Value,
     pub credentials: UserCredentials,
     pub settings: serde_json::Value,
+    /// Inicia em modo simulação (dry-run) — não registra ponto de verdade.
+    #[serde(default)]
+    pub dry_run: bool,
+    /// (Dry-run) tipo de batida a falhar de propósito, p/ ver o reagendamento.
+    #[serde(default)]
+    pub simulate_failure: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,6 +70,8 @@ pub async fn start_automation(
             .and_then(|v| v.as_str())
             .map(|s| s.to_string()),
         pre_assigned_interval,
+        dry_run: data.dry_run,
+        simulate_failure: data.simulate_failure,
     };
 
     manager.start(app, config).await
