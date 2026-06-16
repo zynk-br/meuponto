@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -58,13 +59,17 @@ pub struct NextPunch {
 pub struct AutomationManager {
     cancel_token: CancellationToken,
     is_running: Arc<Mutex<bool>>,
+    /// Espelho síncrono de `is_running`, lido pelo handler de fechar-janela
+    /// (minimizar-para-bandeja) sem precisar de lock async.
+    running_flag: Arc<AtomicBool>,
 }
 
 impl AutomationManager {
-    pub fn new() -> Self {
+    pub fn new(running_flag: Arc<AtomicBool>) -> Self {
         Self {
             cancel_token: CancellationToken::new(),
             is_running: Arc::new(Mutex::new(false)),
+            running_flag,
         }
     }
 
@@ -82,12 +87,14 @@ impl AutomationManager {
             return Err("Automação já está rodando.".to_string());
         }
         *running = true;
+        self.running_flag.store(true, Ordering::Relaxed);
         drop(running);
 
         // Reset cancel token
         self.cancel_token = CancellationToken::new();
         let token = self.cancel_token.clone();
         let is_running = self.is_running.clone();
+        let running_flag = self.running_flag.clone();
 
         emit_status(&app, true, "Iniciando automação...", Some("Preparando..."));
         emit_log(&app, "INFO", "--- Automação Iniciada ---");
@@ -102,6 +109,7 @@ impl AutomationManager {
             // Cleanup
             let mut running = is_running.lock().await;
             *running = false;
+            running_flag.store(false, Ordering::Relaxed);
             power::stop_power_save_blocker();
             emit_status(&app, false, "Automação interrompida.", None);
             emit_log(&app, "INFO", "--- Automação Efetivamente Parada ---");

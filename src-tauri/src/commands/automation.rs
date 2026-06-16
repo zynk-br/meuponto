@@ -32,6 +32,10 @@ pub struct UserCredentials {
 /// Managed state for the automation manager
 pub struct AutomationManagerState(pub Arc<Mutex<AutomationManager>>);
 
+/// Espelho síncrono do estado "rodando", para o handler de fechar-janela
+/// decidir entre minimizar-para-bandeja (rodando) ou encerrar (ocioso).
+pub struct AutomationRunningFlag(pub Arc<std::sync::atomic::AtomicBool>);
+
 #[tauri::command]
 pub async fn start_automation(
     app: AppHandle,
