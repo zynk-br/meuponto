@@ -12,7 +12,7 @@ use tokio::sync::Mutex;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let mut builder = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
@@ -26,9 +26,7 @@ pub fn run() {
 
     // Bridge para o Tauri MCP — apenas em builds de debug (testes/dev).
     #[cfg(debug_assertions)]
-    {
-        builder = builder.plugin(tauri_plugin_mcp_bridge::init());
-    }
+    let builder = builder.plugin(tauri_plugin_mcp_bridge::init());
 
     // Flag síncrona compartilhada entre o manager e o handler de fechar-janela.
     let running_flag = Arc::new(AtomicBool::new(false));

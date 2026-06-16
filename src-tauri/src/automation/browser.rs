@@ -36,13 +36,6 @@ fn chromium_executable(base_dir: &PathBuf) -> PathBuf {
     }
 }
 
-/// Check if Chromium is already downloaded and available
-pub fn is_chromium_available(app: &AppHandle) -> bool {
-    let dir = chromium_dir(app);
-    let exe = chromium_executable(&dir);
-    exe.exists()
-}
-
 /// Get path to the Chromium executable, or None if not available
 pub fn get_chromium_path(app: &AppHandle) -> Option<PathBuf> {
     let dir = chromium_dir(app);

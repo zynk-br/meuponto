@@ -234,11 +234,6 @@ impl DayPlan {
         self.punches.iter().position(|p| p.status.is_actionable())
     }
 
-    /// Verdadeiro quando não resta nenhuma batida acionável.
-    pub fn is_complete(&self) -> bool {
-        self.next_actionable().is_none()
-    }
-
     /// Verdadeiro quando há batidas e todas foram registradas.
     pub fn all_registered(&self) -> bool {
         !self.punches.is_empty()
@@ -397,12 +392,6 @@ impl DayPlan {
         store.set(store_key(self.dry_run), val);
         store.save().map_err(|e| e.to_string())
     }
-
-    pub fn clear(app: &AppHandle, dry_run: bool) -> Result<(), String> {
-        let store = app.store(STORE_FILENAME).map_err(|e| e.to_string())?;
-        store.delete(store_key(dry_run));
-        store.save().map_err(|e| e.to_string())
-    }
 }
 
 #[cfg(test)]
@@ -512,7 +501,7 @@ mod tests {
         for p in plan.punches.iter_mut() {
             p.status = PunchStatus::Registered;
         }
-        assert!(plan.is_complete());
+        assert!(plan.next_actionable().is_none());
     }
 
     #[test]

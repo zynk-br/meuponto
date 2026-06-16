@@ -23,16 +23,6 @@ const PORTAL_DOWN_BACKOFF_SECS: u64 = 300;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ScheduleEntry {
-    pub entrada1: String,
-    pub saida1: String,
-    pub entrada2: String,
-    pub saida2: String,
-    pub feriado: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct AutomationConfig {
     pub schedule: serde_json::Value,
     pub folha: String,

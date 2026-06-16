@@ -1,5 +1,5 @@
-use icalendar::{Calendar, Component, Event, EventLike, Alarm, Related, Trigger};
-use chrono::{Datelike, Duration, Local, NaiveDate, NaiveTime};
+use icalendar::{Calendar, Component, Event, EventLike, Alarm, Trigger};
+use chrono::{Datelike, Duration, Local, NaiveTime};
 use serde::Serialize;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
