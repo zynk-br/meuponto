@@ -136,9 +136,10 @@ async fn run_automation_loop(
         return Ok(());
     }
 
-    // Step 2: Launch browser
+    // Step 2: Launch browser (com perfil persistente → sessão sobrevive a restart)
     emit_status(app, true, "Iniciando navegador...", Some("Browser"));
-    let (mut browser_instance, handler) = browser::launch_browser(chromium_path).await?;
+    let profile = browser::profile_dir(app);
+    let (mut browser_instance, handler) = browser::launch_browser(chromium_path, profile).await?;
     emit_log(app, "SUCESSO", "Navegador iniciado com sucesso.");
 
     // Step 3: Main loop — simulação (one-shot) ou automação real (perpétua)
@@ -163,29 +164,66 @@ async fn automation_heartbeat_loop(
     config: &AutomationConfig,
     cancel_token: &CancellationToken,
 ) -> Result<(), String> {
+    // Página logada persistente: reaproveitada entre ciclos enquanto a sessão
+    // do portal continuar válida, evitando refazer login a cada verificação.
+    // Só faz login completo no 1º ciclo ou quando a sessão expira.
+    let mut session: Option<chromiumoxide::page::Page> = None;
+
     loop {
         if cancel_token.is_cancelled() {
+            if let Some(p) = session.take() {
+                let _ = p.close().await;
+            }
             return Ok(());
         }
 
-        // --- 1. Login + sincronizar pontos do portal (fonte da verdade) ---
+        // --- 1. Garantir página logada (reaproveita a sessão quando possível) ---
         emit_status(app, true, "Sincronizando pontos...", Some("Sync"));
 
-        let page = match portal::login_to_portal(browser, app, &config.folha, &config.senha).await {
-            Ok(p) => p,
-            Err(e) => {
-                // Portal indisponível / login falhou: notifica + backoff de 5min,
-                // sem consumir tentativas de batida.
-                notify_portal_down(app, config, &e).await;
-                wait_or_cancel(cancel_token, std::time::Duration::from_secs(PORTAL_DOWN_BACKOFF_SECS)).await;
-                continue;
-            }
+        let page = match session.take() {
+            // Já há uma página aberta: tenta reaproveitar a sessão (rápido,
+            // sem reenviar credenciais).
+            Some(p) => match portal::reuse_session(&p, app).await {
+                Ok(true) => p,
+                Ok(false) => {
+                    // Sessão expirou: descarta a página e faz login limpo.
+                    let _ = p.close().await;
+                    match portal::login_to_portal(browser, app, &config.folha, &config.senha).await {
+                        Ok(np) => np,
+                        Err(e) => {
+                            notify_portal_down(app, config, &e).await;
+                            wait_or_cancel(cancel_token, std::time::Duration::from_secs(PORTAL_DOWN_BACKOFF_SECS)).await;
+                            continue;
+                        }
+                    }
+                }
+                Err(e) => {
+                    // Portal indisponível ao re-navegar: descarta, notifica + backoff.
+                    let _ = p.close().await;
+                    notify_portal_down(app, config, &e).await;
+                    wait_or_cancel(cancel_token, std::time::Duration::from_secs(PORTAL_DOWN_BACKOFF_SECS)).await;
+                    continue;
+                }
+            },
+            // 1º ciclo (ou após expiração): login completo.
+            None => match portal::login_to_portal(browser, app, &config.folha, &config.senha).await {
+                Ok(p) => p,
+                Err(e) => {
+                    // Portal indisponível / login falhou: notifica + backoff de 5min,
+                    // sem consumir tentativas de batida.
+                    notify_portal_down(app, config, &e).await;
+                    wait_or_cancel(cancel_token, std::time::Duration::from_secs(PORTAL_DOWN_BACKOFF_SECS)).await;
+                    continue;
+                }
+            },
         };
 
         let existing_points = portal::sync_initial_points(&page, app)
             .await
             .unwrap_or_default();
-        let _ = page.close().await;
+        // A página fica viva entre ciclos: nos caminhos sem batida ela é
+        // guardada em `session` (não fechada) para reaproveitar a sessão no
+        // próximo ciclo; na batida é usada direto (sem 2º login).
 
         // --- 2. Montar/retomar o plano-do-dia e reconciliar contra o portal ---
         let plan_opt = load_or_build_plan(app, config, &existing_points);
@@ -200,6 +238,7 @@ async fn automation_heartbeat_loop(
             }
             None => {
                 // Sem plano hoje (fim de semana / feriado / dia sem agenda).
+                session = Some(page);
                 wait_for_next_lookahead(app, config, &existing_points, cancel_token).await;
                 continue;
             }
@@ -213,6 +252,7 @@ async fn automation_heartbeat_loop(
                 "AVISO",
                 &format!("Dia '{}' inválido: {} Não vou registrar pontos hoje.", plan.day_key, reason),
             );
+            session = Some(page);
             wait_for_next_lookahead(app, config, &existing_points, cancel_token).await;
             continue;
         }
@@ -231,6 +271,7 @@ async fn automation_heartbeat_loop(
                     plan.archive(app);
                 }
                 emit_status(app, true, "Todas as batidas de hoje registradas.", None);
+                session = Some(page);
                 wait_for_next_lookahead(app, config, &existing_points, cancel_token).await;
                 continue;
             }
@@ -243,6 +284,7 @@ async fn automation_heartbeat_loop(
                 .num_seconds(),
             None => {
                 emit_log(app, "ERRO", &format!("Horário inválido para {}: {}", punch.punch_type, punch.planned_time));
+                session = Some(page);
                 wait_or_cancel(cancel_token, std::time::Duration::from_secs(300)).await;
                 continue;
             }
@@ -257,18 +299,22 @@ async fn automation_heartbeat_loop(
                 "INFO",
                 &format!("Próxima verificação em {}s para {} @ {}", wait_secs, punch.punch_type, punch.planned_time),
             );
+            session = Some(page);
             wait_or_cancel(cancel_token, std::time::Duration::from_secs(wait_secs as u64)).await;
             continue; // re-sincroniza e reavalia
         }
 
         // Hora de bater (batida vencida e ainda pendente também cai aqui = catch-up).
+        // Usa a própria página da sessão (já logada e na tela) — sem 2º login.
         emit_log(app, "INFO", &format!("Hora de registrar: {} às {}!", punch.punch_type, punch.planned_time));
         emit_status(app, true, &format!("Registrando {}...", punch.punch_type), Some("Punch"));
 
-        perform_punch_with_retry(app, browser, config, &mut plan, idx, &existing_points, cancel_token).await;
+        perform_punch_with_retry(app, config, &mut plan, idx, &existing_points, cancel_token, &page).await;
         let _ = plan.save(app);
         plan.archive(app);
 
+        // Mantém a sessão viva para os próximos ciclos (próxima batida / resumo).
+        session = Some(page);
         wait_or_cancel(cancel_token, std::time::Duration::from_secs(60)).await;
     }
 }
@@ -278,12 +324,12 @@ async fn automation_heartbeat_loop(
 /// `Failed`, envia screenshot via Telegram e reagenda (+`RESCHEDULE_DELAY_MIN`).
 async fn perform_punch_with_retry(
     app: &AppHandle,
-    browser: &chromiumoxide::browser::Browser,
     config: &AutomationConfig,
     plan: &mut DayPlan,
     idx: usize,
     existing_points: &[String],
     cancel_token: &CancellationToken,
+    page: &chromiumoxide::page::Page,
 ) {
     let punch_type = plan.punches[idx].punch_type.clone();
     let planned = plan.punches[idx].planned_time.clone();
@@ -295,24 +341,18 @@ async fn perform_punch_with_retry(
             return;
         }
 
-        let page = match portal::login_to_portal(browser, app, &config.folha, &config.senha).await {
-            Ok(p) => p,
-            Err(e) => {
-                // Portal caiu no meio do registro: notifica + backoff, não conta tentativa.
-                notify_portal_down(app, config, &e).await;
-                wait_or_cancel(cancel_token, std::time::Duration::from_secs(PORTAL_DOWN_BACKOFF_SECS)).await;
-                continue;
-            }
-        };
+        // Usa sempre a página persistente da sessão (já logada e na tela). A 1ª
+        // tentativa reaproveita os pontos já sincronizados (sem pre-check); as
+        // retentativas re-sincronizam o DOM (known=None) para reavaliar.
+        let known: Option<&[String]> = if attempt == 1 { Some(existing_points) } else { None };
 
         plan.record_attempt(idx, None);
         emit_log(app, "INFO", &format!("Tentativa {attempt}/{MAX_PUNCH_RETRIES} de registrar {punch_type} @ {planned}"));
 
-        let result = portal::perform_punch(&page, app, &punch_type, &planned).await;
+        let result = portal::perform_punch(page, app, &punch_type, &planned, known).await;
 
         match result {
             Ok(()) => {
-                let _ = page.close().await;
                 plan.mark_registered(idx, &chrono::Local::now().to_rfc3339());
                 emit_log(app, "SUCESSO", &format!("{prefix}Ponto {punch_type} às {planned} registrado."));
                 notify(app, config, &format!("{prefix}✅ Ponto {punch_type} às {planned} registrado com sucesso!")).await;
@@ -322,13 +362,12 @@ async fn perform_punch_with_retry(
                 last_error = e.clone();
                 emit_log(app, "AVISO", &format!("Tentativa {attempt} falhou: {e}"));
 
-                // Última tentativa: captura a tela (com a página ainda aberta) p/ Telegram.
+                // Última tentativa: captura a tela (página ainda aberta) p/ Telegram.
                 if attempt == MAX_PUNCH_RETRIES {
-                    if let Ok(path) = portal::take_error_screenshot(&page, app, &format!("punch_{punch_type}_falha")).await {
+                    if let Ok(path) = portal::take_error_screenshot(page, app, &format!("punch_{punch_type}_falha")).await {
                         notify_photo(app, config, &path, &format!("{prefix}🔴 Falha ao registrar {punch_type} às {planned}")).await;
                     }
                 }
-                let _ = page.close().await;
 
                 if attempt < MAX_PUNCH_RETRIES {
                     let backoff = 2 * attempt as u64;

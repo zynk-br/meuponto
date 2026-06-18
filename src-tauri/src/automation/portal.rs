@@ -153,6 +153,89 @@ pub async fn login_to_portal(
     Ok(page)
 }
 
+/// Reaproveita uma página já aberta: re-navega para a tela de Incluir Ponto
+/// SEM reenviar credenciais. Enquanto a sessão do portal continua válida
+/// (cookies do navegador persistente), isto é bem mais rápido que um login
+/// completo — não há formulário, redirecionamento de auth nem espera longa.
+///
+/// Retorna `Ok(true)` = sessão ativa e tela pronta; `Ok(false)` = sessão
+/// expirou (caller deve refazer login limpo); `Err` = portal indisponível.
+pub async fn reuse_session(page: &Page, app: &AppHandle) -> Result<bool, String> {
+    emit_log(app, "INFO", "Reaproveitando sessão ativa (sem novo login)...");
+
+    page.goto(PORTAL_URL)
+        .await
+        .map_err(|e| format!("Erro ao re-navegar para o portal: {e}"))?;
+
+    // A SPA precisa de um instante para reidratar a partir dos cookies.
+    sleep(Duration::from_secs(3)).await;
+
+    // Detecta o estado atual: formulário de login (expirou), menu (logado, a
+    // clicar) ou já na tela de Incluir Ponto.
+    let state: String = page
+        .evaluate(
+            r#"
+            (() => {
+                if (document.querySelector('#login-numero-folha')) return 'LOGIN';
+                const menu = document.querySelector('#menu-incluir-ponto');
+                if (menu) { menu.click(); return 'MENU'; }
+                const loc = document.querySelector('#localizacao-incluir-ponto');
+                if (loc || window.location.href.includes('incluir-ponto')) return 'READY';
+                return 'UNKNOWN';
+            })()
+            "#,
+        )
+        .await
+        .map_err(|e| format!("Erro ao verificar estado da sessão: {e}"))?
+        .into_value()
+        .map_err(|e| format!("Erro ao converter estado: {e}"))?;
+
+    match state.as_str() {
+        // Caiu no formulário de login → a sessão expirou.
+        "LOGIN" => {
+            emit_log(app, "INFO", "Sessão do portal expirou — refazendo login.");
+            Ok(false)
+        }
+        // Logado: ou clicamos no menu, ou já estávamos na tela. Confirma.
+        "MENU" | "READY" => {
+            sleep(Duration::from_secs(3)).await;
+            let check: String = page
+                .evaluate(
+                    r#"
+                    (() => {
+                        const loc = document.querySelector('#localizacao-incluir-ponto');
+                        if (loc && loc.textContent.includes('Incluir Ponto')) return 'OK';
+                        if (window.location.href.includes('incluir-ponto')) return 'OK';
+                        return 'FAIL';
+                    })()
+                    "#,
+                )
+                .await
+                .map_err(|e| format!("Erro na verificação da sessão: {e}"))?
+                .into_value()
+                .map_err(|e| format!("Erro ao converter verificação: {e}"))?;
+            if check == "OK" {
+                emit_log(app, "SUCESSO", "Sessão ativa reaproveitada (login pulado).");
+                Ok(true)
+            } else {
+                // Logado mas em tela inesperada → força login limpo por segurança.
+                emit_log(app, "DEBUG", "Sessão ativa mas tela inesperada; forçando novo login.");
+                Ok(false)
+            }
+        }
+        // Estado desconhecido (página em transição / layout estranho): por
+        // segurança, trata como expirada e refaz o login.
+        _ => {
+            emit_log(
+                app,
+                "DEBUG",
+                &format!("Estado de sessão desconhecido ({state}); forçando novo login."),
+            );
+            Ok(false)
+        }
+    }
+}
+
 /// Scrape existing punch entries from the portal page
 pub async fn sync_initial_points(
     page: &Page,
@@ -309,6 +392,7 @@ pub async fn perform_punch(
     app: &AppHandle,
     punch_type: &str,
     punch_time: &str,
+    known_points: Option<&[String]>,
 ) -> Result<(), String> {
     emit_log(
         app,
@@ -316,8 +400,12 @@ pub async fn perform_punch(
         &format!("Tentando registrar ponto: {punch_type} às {punch_time}"),
     );
 
-    // Pre-check: verify the punch isn't already registered
-    let pre_check = sync_initial_points(page, app).await?;
+    // Pre-check: reaproveita os pontos já sincronizados quando disponíveis
+    // (evita um sync redundante logo após o sync do heartbeat); senão sincroniza.
+    let pre_check: Vec<String> = match known_points {
+        Some(p) => p.to_vec(),
+        None => sync_initial_points(page, app).await?,
+    };
     if time_exists_with_tolerance(&pre_check, punch_time, 5) {
         emit_log(
             app,

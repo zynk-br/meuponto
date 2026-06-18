@@ -25,6 +25,15 @@ fn chromium_dir(app: &AppHandle) -> PathBuf {
     app.path().app_data_dir().unwrap().join("chromium")
 }
 
+/// Diretório de perfil persistente do Chromium. Mantém cookies/localStorage
+/// (a sessão do portal) em disco entre execuções do navegador e reinícios do
+/// app — equivalente ao `storageState`: depois do 1º login, os ciclos seguintes
+/// já sobem autenticados, sem reenviar credenciais, até a sessão expirar no
+/// servidor.
+pub fn profile_dir(app: &AppHandle) -> PathBuf {
+    app.path().app_data_dir().unwrap().join("chrome-profile")
+}
+
 /// Returns the expected path to the Chromium executable
 fn chromium_executable(base_dir: &PathBuf) -> PathBuf {
     if cfg!(target_os = "macos") {
@@ -268,10 +277,23 @@ fn emit_progress(app: &AppHandle, percent: f64, message: &str) {
     );
 }
 
-/// Launch a headless Chromium browser
-pub async fn launch_browser(executable_path: PathBuf) -> Result<(Browser, tokio::task::JoinHandle<()>), String> {
+/// Launch a headless Chromium browser.
+///
+/// `user_data_dir` é um diretório de perfil persistente: o Chromium guarda ali
+/// cookies/localStorage, então a sessão do portal sobrevive entre execuções do
+/// navegador e reinícios do app (ver [`profile_dir`]).
+pub async fn launch_browser(
+    executable_path: PathBuf,
+    user_data_dir: PathBuf,
+) -> Result<(Browser, tokio::task::JoinHandle<()>), String> {
+    // Garante o diretório de perfil antes de lançar.
+    if let Err(e) = std::fs::create_dir_all(&user_data_dir) {
+        return Err(format!("Erro ao criar diretório de perfil: {e}"));
+    }
+
     let config = BrowserConfig::builder()
         .chrome_executable(executable_path)
+        .user_data_dir(user_data_dir)
         .arg("--no-sandbox")
         .arg("--disable-setuid-sandbox")
         .arg("--disable-gpu")

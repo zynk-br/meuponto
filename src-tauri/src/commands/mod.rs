@@ -41,9 +41,10 @@ pub async fn test_sync_points(
         }
     };
 
-    // 2. Lançar browser
+    // 2. Lançar browser (perfil persistente → reaproveita sessão se houver)
     emit_log(&app, "INFO", "Lançando navegador headless...");
-    let (mut browser_instance, handler) = browser::launch_browser(chromium_path).await?;
+    let profile = browser::profile_dir(&app);
+    let (mut browser_instance, handler) = browser::launch_browser(chromium_path, profile).await?;
     emit_log(&app, "SUCESSO", "Navegador iniciado.");
 
     // 3. Login
