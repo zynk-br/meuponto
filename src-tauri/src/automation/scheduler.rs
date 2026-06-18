@@ -180,24 +180,43 @@ async fn automation_heartbeat_loop(
         // --- 1. Garantir página logada (reaproveita a sessão quando possível) ---
         emit_status(app, true, "Sincronizando pontos...", Some("Sync"));
 
+        // Faz login limpo (cancelável). `existing` é a página a descartar ao
+        // expirar a sessão; retorna o resultado do login ou trata cancelamento.
+        macro_rules! fresh_login_or {
+            ($discard:expr) => {
+                match cancelable(cancel_token, portal::login_to_portal(browser, app, &config.folha, &config.senha)).await {
+                    None => {
+                        // Interrompido pelo usuário durante o login.
+                        if let Some(p) = $discard { let _ = p.close().await; }
+                        return Ok(());
+                    }
+                    Some(Ok(np)) => {
+                        if let Some(p) = $discard { let _ = p.close().await; }
+                        np
+                    }
+                    Some(Err(e)) => {
+                        if let Some(p) = $discard { let _ = p.close().await; }
+                        notify_portal_down(app, config, &e).await;
+                        wait_or_cancel(cancel_token, std::time::Duration::from_secs(PORTAL_DOWN_BACKOFF_SECS)).await;
+                        continue;
+                    }
+                }
+            };
+        }
+
         let page = match session.take() {
             // Já há uma página aberta: tenta reaproveitar a sessão (rápido,
             // sem reenviar credenciais).
-            Some(p) => match portal::reuse_session(&p, app).await {
-                Ok(true) => p,
-                Ok(false) => {
-                    // Sessão expirou: descarta a página e faz login limpo.
+            Some(p) => match cancelable(cancel_token, portal::reuse_session(&p, app)).await {
+                None => {
+                    // Interrompido durante o reuse.
                     let _ = p.close().await;
-                    match portal::login_to_portal(browser, app, &config.folha, &config.senha).await {
-                        Ok(np) => np,
-                        Err(e) => {
-                            notify_portal_down(app, config, &e).await;
-                            wait_or_cancel(cancel_token, std::time::Duration::from_secs(PORTAL_DOWN_BACKOFF_SECS)).await;
-                            continue;
-                        }
-                    }
+                    return Ok(());
                 }
-                Err(e) => {
+                Some(Ok(true)) => p,
+                // Sessão expirou: descarta a página e faz login limpo.
+                Some(Ok(false)) => fresh_login_or!(Some(p)),
+                Some(Err(e)) => {
                     // Portal indisponível ao re-navegar: descarta, notifica + backoff.
                     let _ = p.close().await;
                     notify_portal_down(app, config, &e).await;
@@ -206,21 +225,17 @@ async fn automation_heartbeat_loop(
                 }
             },
             // 1º ciclo (ou após expiração): login completo.
-            None => match portal::login_to_portal(browser, app, &config.folha, &config.senha).await {
-                Ok(p) => p,
-                Err(e) => {
-                    // Portal indisponível / login falhou: notifica + backoff de 5min,
-                    // sem consumir tentativas de batida.
-                    notify_portal_down(app, config, &e).await;
-                    wait_or_cancel(cancel_token, std::time::Duration::from_secs(PORTAL_DOWN_BACKOFF_SECS)).await;
-                    continue;
-                }
-            },
+            None => fresh_login_or!(None::<chromiumoxide::page::Page>),
         };
 
-        let existing_points = portal::sync_initial_points(&page, app)
-            .await
-            .unwrap_or_default();
+        let existing_points = match cancelable(cancel_token, portal::sync_initial_points(&page, app)).await {
+            None => {
+                // Interrompido durante o sync.
+                let _ = page.close().await;
+                return Ok(());
+            }
+            Some(r) => r.unwrap_or_default(),
+        };
         // A página fica viva entre ciclos: nos caminhos sem batida ela é
         // guardada em `session` (não fechada) para reaproveitar a sessão no
         // próximo ciclo; na batida é usada direto (sem 2º login).
@@ -309,7 +324,16 @@ async fn automation_heartbeat_loop(
         emit_log(app, "INFO", &format!("Hora de registrar: {} às {}!", punch.punch_type, punch.planned_time));
         emit_status(app, true, &format!("Registrando {}...", punch.punch_type), Some("Punch"));
 
-        perform_punch_with_retry(app, config, &mut plan, idx, &existing_points, cancel_token, &page).await;
+        let punched = cancelable(
+            cancel_token,
+            perform_punch_with_retry(app, config, &mut plan, idx, &existing_points, cancel_token, &page),
+        )
+        .await;
+        if punched.is_none() {
+            // Interrompido durante a batida.
+            let _ = page.close().await;
+            return Ok(());
+        }
         let _ = plan.save(app);
         plan.archive(app);
 
@@ -617,6 +641,20 @@ async fn wait_or_cancel(token: &CancellationToken, duration: std::time::Duration
     tokio::select! {
         _ = token.cancelled() => {}
         _ = tokio::time::sleep(duration) => {}
+    }
+}
+
+/// Executa um future tornando-o cancelável: retorna `Some(resultado)` quando ele
+/// completa, ou `None` se o `cancel_token` for acionado antes. Usado para que o
+/// botão Interromper interrompa imediatamente operações longas do portal
+/// (login, reuse, sync, batida) — que internamente usam `sleep` não-cancelável.
+async fn cancelable<T, F>(token: &CancellationToken, fut: F) -> Option<T>
+where
+    F: std::future::Future<Output = T>,
+{
+    tokio::select! {
+        _ = token.cancelled() => None,
+        v = fut => Some(v),
     }
 }
 

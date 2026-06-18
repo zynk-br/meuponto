@@ -1,7 +1,36 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useAppContext } from '../hooks/useAppContext';
 import { DayOfWeek, LogLevel, TimeEntry, Schedule, AutomationMode, MonthlySchedule, MonthlyDayEntry } from '../types';
 import { DAYS_OF_WEEK } from '../constants';
+
+// Persistência dos horários no localStorage (sobrevive ao fechar o app).
+// A webview do Tauri mantém o localStorage em disco entre execuções.
+const SCHEDULES_LS_KEY = 'meuponto.schedules.v1';
+
+const emptyWeek = (): Schedule => ({
+  [DayOfWeek.MONDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
+  [DayOfWeek.TUESDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
+  [DayOfWeek.WEDNESDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
+  [DayOfWeek.THURSDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
+  [DayOfWeek.FRIDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
+});
+
+interface PersistedSchedules {
+  weeklyManual?: Schedule;
+  weeklyAuto?: Schedule;
+  monthlyAuto?: MonthlySchedule;
+  initialHourWeeklyAuto?: string;
+  initialHourMonthlyAuto?: string;
+}
+
+function loadPersistedSchedules(): PersistedSchedules {
+  try {
+    const raw = localStorage.getItem(SCHEDULES_LS_KEY);
+    return raw ? (JSON.parse(raw) as PersistedSchedules) : {};
+  } catch {
+    return {};
+  }
+}
 import MonthlyCalendar from '../components/MonthlyCalendar';
 import ConfirmDialog from '../components/ConfirmDialog';
 import * as tauriAPI from '../hooks/useTauriAPI';
@@ -146,25 +175,37 @@ const AppView: React.FC = () => {
     </div>
   );
 
-  // Estados separados para cada modo (não se influenciam)
-  const [weeklyManualSchedule, setWeeklyManualSchedule] = useState<Schedule>({
-    [DayOfWeek.MONDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
-    [DayOfWeek.TUESDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
-    [DayOfWeek.WEDNESDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
-    [DayOfWeek.THURSDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
-    [DayOfWeek.FRIDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
-  });
-  const [weeklyAutoSchedule, setWeeklyAutoSchedule] = useState<Schedule>({
-    [DayOfWeek.MONDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
-    [DayOfWeek.TUESDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
-    [DayOfWeek.WEDNESDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
-    [DayOfWeek.THURSDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
-    [DayOfWeek.FRIDAY]: { entrada1: '', saida1: '', entrada2: '', saida2: '', feriado: false },
-  });
-  const [monthlyAutoSchedule, setMonthlyAutoSchedule] = useState<MonthlySchedule>({});
+  // Carrega uma única vez os horários persistidos para hidratar os estados.
+  const persistedRef = useRef<PersistedSchedules | null>(null);
+  if (persistedRef.current === null) persistedRef.current = loadPersistedSchedules();
+  const persisted = persistedRef.current;
 
-  const [initialHourWeeklyAuto, setInitialHourWeeklyAuto] = useState<string>("07:00");
-  const [initialHourMonthlyAuto, setInitialHourMonthlyAuto] = useState<string>("07:00");
+  // Estados separados para cada modo (não se influenciam), hidratados do disco.
+  const [weeklyManualSchedule, setWeeklyManualSchedule] = useState<Schedule>(() => persisted.weeklyManual ?? emptyWeek());
+  const [weeklyAutoSchedule, setWeeklyAutoSchedule] = useState<Schedule>(() => persisted.weeklyAuto ?? emptyWeek());
+  const [monthlyAutoSchedule, setMonthlyAutoSchedule] = useState<MonthlySchedule>(() => persisted.monthlyAuto ?? {});
+
+  const [initialHourWeeklyAuto, setInitialHourWeeklyAuto] = useState<string>(() => persisted.initialHourWeeklyAuto ?? "07:00");
+  const [initialHourMonthlyAuto, setInitialHourMonthlyAuto] = useState<string>(() => persisted.initialHourMonthlyAuto ?? "07:00");
+
+  // Persiste os horários no localStorage sempre que mudarem, para sobreviverem
+  // ao fechamento do app.
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        SCHEDULES_LS_KEY,
+        JSON.stringify({
+          weeklyManual: weeklyManualSchedule,
+          weeklyAuto: weeklyAutoSchedule,
+          monthlyAuto: monthlyAutoSchedule,
+          initialHourWeeklyAuto,
+          initialHourMonthlyAuto,
+        } satisfies PersistedSchedules),
+      );
+    } catch {
+      /* ignora erros de quota/serialização */
+    }
+  }, [weeklyManualSchedule, weeklyAutoSchedule, monthlyAutoSchedule, initialHourWeeklyAuto, initialHourMonthlyAuto]);
 
   const handleModeChange = (mode: AutomationMode) => {
     setAutomationMode(mode);
