@@ -20,6 +20,10 @@ const MAX_PUNCH_RETRIES: u8 = 3;
 const RESCHEDULE_DELAY_MIN: i32 = 10;
 /// Backoff quando o portal está indisponível (login/navegação falhou).
 const PORTAL_DOWN_BACKOFF_SECS: u64 = 300;
+/// Falhas LIMPAS seguidas (portal respondeu com erro) antes de reiniciar o
+/// navegador como medida defensiva. Um timeout de navegação (sem resposta)
+/// reinicia na hora, pois indica navegador travado.
+const MAX_PORTAL_FAILURES_BEFORE_RESTART: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -114,6 +118,36 @@ impl AutomationManager {
     }
 }
 
+/// Por que o heartbeat encerrou.
+enum LoopOutcome {
+    /// Parada solicitada pelo usuário.
+    Cancelled,
+    /// O navegador ficou inutilizável (navegação travada/erros repetidos) e
+    /// precisa ser reiniciado para a automação se recuperar.
+    NeedsBrowserRestart,
+}
+
+/// Encerra o navegador de forma robusta: `close()` depende do handler CDP e pode
+/// travar se o processo estiver preso. Damos timeout e, se estourar, `kill()`
+/// força o encerramento. Coleta o processo para evitar zumbis.
+async fn teardown_browser(
+    app: &AppHandle,
+    mut browser_instance: chromiumoxide::browser::Browser,
+    handler: tokio::task::JoinHandle<()>,
+) {
+    emit_log(app, "INFO", "Fechando navegador...");
+    match tokio::time::timeout(std::time::Duration::from_secs(8), browser_instance.close()).await {
+        Ok(_) => {}
+        Err(_) => {
+            emit_log(app, "AVISO", "Fechamento normal travou; forçando encerramento do navegador.");
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(5), browser_instance.kill()).await;
+        }
+    }
+    handler.abort();
+    let _ = browser_instance.try_wait(); // coleta o processo encerrado (evita zumbi)
+    emit_log(app, "INFO", "Navegador fechado.");
+}
+
 async fn run_automation_loop(
     app: &AppHandle,
     config: &AutomationConfig,
@@ -136,36 +170,50 @@ async fn run_automation_loop(
         return Ok(());
     }
 
-    // Step 2: Launch browser (com perfil persistente → sessão sobrevive a restart)
-    emit_status(app, true, "Iniciando navegador...", Some("Browser"));
     let profile = browser::profile_dir(app);
-    let (mut browser_instance, handler) = browser::launch_browser(chromium_path, profile).await?;
-    emit_log(app, "SUCESSO", "Navegador iniciado com sucesso.");
 
-    // Step 3: Main loop — simulação (one-shot) ou automação real (perpétua)
-    let result = if config.dry_run {
-        simulate_day(app, &browser_instance, config, cancel_token).await
-    } else {
-        automation_heartbeat_loop(app, &browser_instance, config, cancel_token).await
-    };
+    // Dry-run: execução única (sem loop de reinício).
+    if config.dry_run {
+        emit_status(app, true, "Iniciando navegador...", Some("Browser"));
+        let (browser_instance, handler) =
+            browser::launch_browser(chromium_path.clone(), profile.clone()).await?;
+        emit_log(app, "SUCESSO", "Navegador iniciado com sucesso.");
+        let result = simulate_day(app, &browser_instance, config, cancel_token).await;
+        teardown_browser(app, browser_instance, handler).await;
+        return result;
+    }
 
-    // Cleanup: fecha o navegador. `close()` depende do handler CDP e pode travar
-    // se o navegador estiver preso (ex.: navegação pendurada sem rede). Damos um
-    // timeout e, se estourar, matamos o processo à força — assim o Interromper
-    // sempre conclui e a automação realmente para.
-    emit_log(app, "INFO", "Fechando navegador...");
-    match tokio::time::timeout(std::time::Duration::from_secs(8), browser_instance.close()).await {
-        Ok(_) => {}
-        Err(_) => {
-            emit_log(app, "AVISO", "Fechamento normal travou; forçando encerramento do navegador.");
-            let _ = tokio::time::timeout(std::time::Duration::from_secs(5), browser_instance.kill()).await;
+    // Automação real: relança o navegador se ele ficar inutilizável (ex.: após
+    // uma navegação abortada por timeout, que deixa o CDP num estado quebrado e
+    // impede qualquer login subsequente). O perfil persistente preserva a sessão,
+    // então o re-login após o restart continua rápido.
+    loop {
+        if cancel_token.is_cancelled() {
+            return Ok(());
+        }
+
+        emit_status(app, true, "Iniciando navegador...", Some("Browser"));
+        let (browser_instance, handler) =
+            browser::launch_browser(chromium_path.clone(), profile.clone()).await?;
+        emit_log(app, "SUCESSO", "Navegador iniciado com sucesso.");
+
+        let outcome = automation_heartbeat_loop(app, &browser_instance, config, cancel_token).await;
+        teardown_browser(app, browser_instance, handler).await;
+
+        match outcome {
+            Ok(LoopOutcome::Cancelled) => return Ok(()),
+            Err(e) => return Err(e),
+            Ok(LoopOutcome::NeedsBrowserRestart) => {
+                if cancel_token.is_cancelled() {
+                    return Ok(());
+                }
+                emit_log(app, "INFO", "Reiniciando o navegador para recuperar a automação...");
+                emit_status(app, true, "Reiniciando navegador...", Some("Browser"));
+                wait_or_cancel(cancel_token, std::time::Duration::from_secs(5)).await;
+                continue;
+            }
         }
     }
-    handler.abort();
-    let _ = browser_instance.try_wait(); // coleta o processo encerrado (evita zumbi)
-    emit_log(app, "INFO", "Navegador fechado.");
-
-    result
 }
 
 async fn automation_heartbeat_loop(
@@ -173,21 +221,47 @@ async fn automation_heartbeat_loop(
     browser: &chromiumoxide::browser::Browser,
     config: &AutomationConfig,
     cancel_token: &CancellationToken,
-) -> Result<(), String> {
+) -> Result<LoopOutcome, String> {
     // Página logada persistente: reaproveitada entre ciclos enquanto a sessão
     // do portal continuar válida, evitando refazer login a cada verificação.
     // Só faz login completo no 1º ciclo ou quando a sessão expira.
     let mut session: Option<chromiumoxide::page::Page> = None;
+    // Falhas LIMPAS seguidas; ao atingir o limite, pede restart do navegador.
+    let mut portal_failures: u32 = 0;
 
     loop {
         if cancel_token.is_cancelled() {
             // Não fecha a página aqui: o teardown do navegador (com kill) cuida
             // disso. Retornar já garante que o Interromper conclua sem travar.
-            return Ok(());
+            return Ok(LoopOutcome::Cancelled);
         }
 
         // --- 1. Garantir página logada (reaproveita a sessão quando possível) ---
         emit_status(app, true, "Sincronizando pontos...", Some("Sync"));
+
+        // Navegação SEM resposta (timeout) → navegador provavelmente travado
+        // (estado quebrado após uma navegação abortada): reinicia o navegador já.
+        macro_rules! restart_now {
+            ($msg:expr) => {{
+                notify_portal_down(app, config, $msg).await;
+                emit_log(app, "AVISO", "Navegação sem resposta (provável navegador travado). Reiniciando o navegador...");
+                return Ok(LoopOutcome::NeedsBrowserRestart);
+            }};
+        }
+        // Falha LIMPA (portal respondeu com erro / sem rede detectada): backoff e
+        // tenta de novo; após várias seguidas, reinicia o navegador por precaução.
+        macro_rules! clean_fail {
+            ($msg:expr) => {{
+                portal_failures += 1;
+                notify_portal_down(app, config, $msg).await;
+                if portal_failures >= MAX_PORTAL_FAILURES_BEFORE_RESTART {
+                    emit_log(app, "AVISO", "Falhas repetidas de acesso ao portal. Reiniciando o navegador...");
+                    return Ok(LoopOutcome::NeedsBrowserRestart);
+                }
+                wait_or_cancel(cancel_token, std::time::Duration::from_secs(PORTAL_DOWN_BACKOFF_SECS)).await;
+                continue;
+            }};
+        }
 
         // Login limpo com timeout + cancelamento. Em CANCELAMENTO retorna sem
         // fechar nada (o teardown do navegador cuida disso) — assim o Interromper
@@ -195,12 +269,10 @@ async fn automation_heartbeat_loop(
         macro_rules! fresh_login_or {
             ($discard:expr) => {
                 match run_portal_op(cancel_token, portal::login_to_portal(browser, app, &config.folha, &config.senha)).await {
-                    PortalOp::Cancelled => return Ok(()),
+                    PortalOp::Cancelled => return Ok(LoopOutcome::Cancelled),
                     PortalOp::TimedOut => {
                         if let Some(p) = $discard { close_page_safe(p).await; }
-                        notify_portal_down(app, config, "tempo de login esgotado (sem resposta do portal)").await;
-                        wait_or_cancel(cancel_token, std::time::Duration::from_secs(PORTAL_DOWN_BACKOFF_SECS)).await;
-                        continue;
+                        restart_now!("tempo de login esgotado (sem resposta do portal)");
                     }
                     PortalOp::Done(Ok(np)) => {
                         if let Some(p) = $discard { close_page_safe(p).await; }
@@ -208,9 +280,7 @@ async fn automation_heartbeat_loop(
                     }
                     PortalOp::Done(Err(e)) => {
                         if let Some(p) = $discard { close_page_safe(p).await; }
-                        notify_portal_down(app, config, &e).await;
-                        wait_or_cancel(cancel_token, std::time::Duration::from_secs(PORTAL_DOWN_BACKOFF_SECS)).await;
-                        continue;
+                        clean_fail!(&e);
                     }
                 }
             };
@@ -220,22 +290,18 @@ async fn automation_heartbeat_loop(
             // Já há uma página aberta: tenta reaproveitar a sessão (rápido,
             // sem reenviar credenciais).
             Some(p) => match run_portal_op(cancel_token, portal::reuse_session(&p, app)).await {
-                PortalOp::Cancelled => return Ok(()),
+                PortalOp::Cancelled => return Ok(LoopOutcome::Cancelled),
                 PortalOp::Done(Ok(true)) => p,
                 // Sessão expirou: descarta a página e faz login limpo.
                 PortalOp::Done(Ok(false)) => fresh_login_or!(Some(p)),
                 PortalOp::TimedOut => {
-                    // Navegação travou (ex.: internet caiu): descarta + backoff.
+                    // Navegação travou (navegador preso): reinicia o navegador.
                     close_page_safe(p).await;
-                    notify_portal_down(app, config, "tempo de reaproveitamento de sessão esgotado").await;
-                    wait_or_cancel(cancel_token, std::time::Duration::from_secs(PORTAL_DOWN_BACKOFF_SECS)).await;
-                    continue;
+                    restart_now!("tempo de reaproveitamento de sessão esgotado");
                 }
                 PortalOp::Done(Err(e)) => {
                     close_page_safe(p).await;
-                    notify_portal_down(app, config, &e).await;
-                    wait_or_cancel(cancel_token, std::time::Duration::from_secs(PORTAL_DOWN_BACKOFF_SECS)).await;
-                    continue;
+                    clean_fail!(&e);
                 }
             },
             // 1º ciclo (ou após expiração): login completo.
@@ -243,14 +309,15 @@ async fn automation_heartbeat_loop(
         };
 
         let existing_points = match run_portal_op(cancel_token, portal::sync_initial_points(&page, app)).await {
-            PortalOp::Cancelled => return Ok(()),
+            PortalOp::Cancelled => return Ok(LoopOutcome::Cancelled),
             PortalOp::TimedOut => {
                 close_page_safe(page).await;
-                notify_portal_down(app, config, "tempo de sincronização esgotado").await;
-                wait_or_cancel(cancel_token, std::time::Duration::from_secs(PORTAL_DOWN_BACKOFF_SECS)).await;
-                continue;
+                restart_now!("tempo de sincronização esgotado");
             }
-            PortalOp::Done(r) => r.unwrap_or_default(),
+            PortalOp::Done(r) => {
+                portal_failures = 0;
+                r.unwrap_or_default()
+            }
         };
         // A página fica viva entre ciclos: nos caminhos sem batida ela é
         // guardada em `session` (não fechada) para reaproveitar a sessão no
@@ -347,7 +414,7 @@ async fn automation_heartbeat_loop(
         .await;
         if punched.is_none() {
             // Interrompido durante a batida — retorna já (teardown fecha tudo).
-            return Ok(());
+            return Ok(LoopOutcome::Cancelled);
         }
         let _ = plan.save(app);
         plan.archive(app);
