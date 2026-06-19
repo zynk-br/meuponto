@@ -1,6 +1,6 @@
 [package]
 name = "meu-ponto"
-version = "3.0.3"
+version = "3.0.4"
 description = "Automatizador de ponto"
 authors = ["Zynk Tech <douglas@zynk.com.br>"]
 license = "ISC"
