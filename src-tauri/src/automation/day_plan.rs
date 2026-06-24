@@ -212,21 +212,117 @@ impl DayPlan {
         Some(plan)
     }
 
-    /// Reconcilia o plano contra os pontos reais do portal. Marca como
-    /// `Registered` toda batida (não-registrada) cujo horário planejado casar.
+    /// Reconcilia o plano contra os pontos reais do portal.
+    ///
+    /// Casa os pontos com as batidas geridas POR ORDEM cronológica: o k-ésimo
+    /// ponto real é a k-ésima batida do plano (a lista de batidas já exclui as
+    /// pré-assinaladas). Assim, uma `entrada1` batida manualmente num horário
+    /// diferente do planejado é reconhecida (não dispara de novo). Cada batida
+    /// casada vira `Registered` com o horário REAL, e as batidas ainda pendentes
+    /// são re-ancoradas a partir desses horários (recalcula saida2/entrada2 para
+    /// manter a jornada).
     pub fn reconcile(&mut self, existing_points: &[String], now_iso: &str) {
-        for p in self.punches.iter_mut() {
-            if p.status == PunchStatus::Registered {
-                continue;
-            }
-            if time_matches(existing_points, &p.planned_time) {
+        // Pontos reais ordenados cronologicamente.
+        let mut pts: Vec<i32> = existing_points
+            .iter()
+            .filter_map(|p| parse_time_minutes(p))
+            .collect();
+        pts.sort_unstable();
+
+        for (i, p) in self.punches.iter_mut().enumerate() {
+            let real_min = match pts.get(i) {
+                Some(&m) => m,
+                None => break, // sem ponto real para esta batida (ainda pendente)
+            };
+            if p.status != PunchStatus::Registered {
                 p.status = PunchStatus::Registered;
                 if p.registered_at.is_none() {
                     p.registered_at = Some(now_iso.to_string());
                 }
             }
+            // Reflete o horário REAL (para summary/auditoria e re-anchoring).
+            p.planned_time = crate::utils::time::minutes_to_time_string(real_min);
         }
+
+        self.reanchor_pending();
         self.last_reconciled_at = Some(now_iso.to_string());
+    }
+
+    /// Re-ancora as batidas ainda PENDENTES a partir dos horários já registrados
+    /// (reais), preservando a jornada de trabalho agendada:
+    /// - `entrada2` ← saída1 real + almoço agendado;
+    /// - `saida2`   ← entrada2 + (trabalho agendado − manhã real), de modo que o
+    ///   total trabalhado seja o agendado mesmo com almoço mais longo (>1h);
+    ///   se só a `entrada1` é conhecida, usa o span total agendado (trabalho+almoço).
+    fn reanchor_pending(&mut self) {
+        use crate::utils::time::{minutes_to_time_string, parse_time_to_minutes};
+
+        // Horário cru (agenda) por tipo.
+        let orig = |t: &str| -> Option<i32> {
+            self.punches
+                .iter()
+                .find(|p| p.punch_type == t)
+                .and_then(|p| parse_time_to_minutes(&p.original_time))
+        };
+        // Horário REAL já registrado por tipo.
+        let reg = |t: &str| -> Option<i32> {
+            self.punches
+                .iter()
+                .find(|p| p.punch_type == t && p.status == PunchStatus::Registered)
+                .and_then(|p| parse_time_to_minutes(&p.planned_time))
+        };
+
+        let (e1_o, s1_o, e2_o, s2_o) =
+            (orig("entrada1"), orig("saida1"), orig("entrada2"), orig("saida2"));
+        let (e1_r, s1_r, e2_r) = (reg("entrada1"), reg("saida1"), reg("entrada2"));
+
+        // Span total agendado (trabalho + almoço) e trabalho/almoço agendados.
+        let total_span = match (e1_o, s2_o) {
+            (Some(a), Some(b)) => Some(b - a),
+            _ => None,
+        };
+        let sched_worked = match (e1_o, s1_o, e2_o, s2_o) {
+            (Some(a), Some(b), Some(c), Some(d)) => Some((b - a) + (d - c)),
+            _ => None,
+        };
+        let sched_lunch = match (s1_o, e2_o) {
+            (Some(b), Some(c)) => Some(c - b),
+            _ => None,
+        };
+
+        // entrada2 pendente ← saída1 real + almoço agendado.
+        let new_e2 = match (s1_r, sched_lunch) {
+            (Some(s1), Some(l)) => Some(s1 + l),
+            _ => None,
+        };
+        // entrada2 efetivo (real ou recém-calculado) p/ calcular saida2.
+        let e2_eff = e2_r.or(new_e2);
+        // saida2 pendente.
+        let new_s2 = if let (Some(e1), Some(s1), Some(e2), Some(worked)) =
+            (e1_r, s1_r, e2_eff, sched_worked)
+        {
+            // Mantém a jornada: total trabalhado = agendado, independente do almoço.
+            Some(e2 + (worked - (s1 - e1)))
+        } else if let (Some(e1), Some(span)) = (e1_r, total_span) {
+            // Só entrada1 conhecida: preserva o span agendado (trabalho + almoço).
+            Some(e1 + span)
+        } else {
+            None
+        };
+
+        for p in self.punches.iter_mut() {
+            if p.status == PunchStatus::Registered {
+                continue;
+            }
+            let nt = match p.punch_type.as_str() {
+                "entrada2" => new_e2,
+                "saida2" => new_s2,
+                _ => None, // entrada1/saida1 pendentes mantêm o horário da agenda
+            };
+            if let Some(m) = nt {
+                p.planned_time = minutes_to_time_string(m);
+            }
+        }
     }
 
     /// Índice da próxima batida acionável (na ordem de prioridade).
@@ -478,18 +574,54 @@ mod tests {
     }
 
     #[test]
-    fn reconcile_marks_registered_for_matching_points() {
+    fn reconcile_matches_points_in_order() {
         let d = day("08:00", "12:00", "13:00", "17:00");
         let mut plan = DayPlan::build("2026-06-16", "Terça-feira", &d, &[], false, false, "now");
-        // Ponto manual às 12:02 casa com saida1 (12:00) dentro da tolerância.
-        plan.reconcile(&["12:02".to_string()], "ts");
-        let s1 = plan.punches.iter().find(|p| p.punch_type == "saida1").unwrap();
-        assert_eq!(s1.status, PunchStatus::Registered);
-        assert_eq!(s1.registered_at.as_deref(), Some("ts"));
-        assert_eq!(plan.last_reconciled_at.as_deref(), Some("ts"));
-        // entrada1 (08:00) não casa → continua pendente.
+        // entrada1 batida manualmente às 07:46 (≈1h antes do planejado 08:00).
+        // Por ORDEM, o 1º ponto é a entrada1 — mesmo longe do horário planejado.
+        plan.reconcile(&["07:46".to_string()], "ts");
         let e1 = plan.punches.iter().find(|p| p.punch_type == "entrada1").unwrap();
-        assert_eq!(e1.status, PunchStatus::Pending);
+        assert_eq!(e1.status, PunchStatus::Registered);
+        assert_eq!(e1.planned_time, "07:46"); // reflete o horário real
+        assert_eq!(e1.registered_at.as_deref(), Some("ts"));
+        assert_eq!(plan.last_reconciled_at.as_deref(), Some("ts"));
+        // saida1 (só 1 ponto registrado) continua pendente.
+        let s1 = plan.punches.iter().find(|p| p.punch_type == "saida1").unwrap();
+        assert_eq!(s1.status, PunchStatus::Pending);
+    }
+
+    #[test]
+    fn reconcile_reanchors_saida2_on_early_entrada1_pre_assigned() {
+        // Pré-assinalado: batidas = [entrada1, saida2], span agendado = 9h.
+        let d = day("08:44", "12:00", "13:00", "17:44");
+        let mut plan = DayPlan::build("2026-06-16", "Terça-feira", &d, &[], true, false, "now");
+        // entrada1 manual às 07:46 → saida2 deve reancorar para 07:46 + 9h = 16:46.
+        plan.reconcile(&["07:46".to_string()], "ts");
+        let e1 = plan.punches.iter().find(|p| p.punch_type == "entrada1").unwrap();
+        assert_eq!(e1.status, PunchStatus::Registered);
+        assert_eq!(e1.planned_time, "07:46");
+        let s2 = plan.punches.iter().find(|p| p.punch_type == "saida2").unwrap();
+        assert_eq!(s2.status, PunchStatus::Pending);
+        assert_eq!(s2.planned_time, "16:46");
+    }
+
+    #[test]
+    fn reconcile_keeps_8h_with_long_lunch() {
+        // Agenda: 08:00-12:00 / 13:00-17:00 → 8h trabalho, 1h almoço.
+        let d = day("08:00", "12:00", "13:00", "17:00");
+        let mut plan = DayPlan::build("2026-06-16", "Terça-feira", &d, &[], false, false, "now");
+        // entrada1 08:00, saida1 12:00, entrada2 14:00 (almoço de 2h).
+        plan.reconcile(
+            &["08:00".to_string(), "12:00".to_string(), "14:00".to_string()],
+            "ts",
+        );
+        let e2 = plan.punches.iter().find(|p| p.punch_type == "entrada2").unwrap();
+        assert_eq!(e2.status, PunchStatus::Registered);
+        assert_eq!(e2.planned_time, "14:00");
+        // saida2 = entrada2 + (trabalho agendado − manhã real) = 14:00 + (8h − 4h) = 18:00.
+        let s2 = plan.punches.iter().find(|p| p.punch_type == "saida2").unwrap();
+        assert_eq!(s2.status, PunchStatus::Pending);
+        assert_eq!(s2.planned_time, "18:00");
     }
 
     #[test]

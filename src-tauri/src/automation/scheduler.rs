@@ -395,7 +395,7 @@ async fn automation_heartbeat_loop(
             emit_log(
                 app,
                 "INFO",
-                &format!("Próxima verificação em {}s para {} @ {}", wait_secs, punch.punch_type, punch.planned_time),
+                &format!("Próxima verificação em {} para {} @ {}", fmt_duration(wait_secs), punch.punch_type, punch.planned_time),
             );
             session = Some(page);
             wait_or_cancel(cancel_token, std::time::Duration::from_secs(wait_secs as u64)).await;
@@ -663,6 +663,14 @@ async fn wait_for_next_lookahead(
                 .max(5);
             let wait_secs = calc_heartbeat_interval(secs);
             emit_status(app, true, &format!("Próxima batida: {} {} às {}", p.day_key, p.punch_type, p.time), None);
+            emit_log(
+                app,
+                "INFO",
+                &format!(
+                    "Sem batidas pendentes agora. Próxima: {} {} @ {} (em {}). Aguardando {} para a próxima verificação.",
+                    p.day_key, p.punch_type, p.time, fmt_duration(secs), fmt_duration(wait_secs)
+                ),
+            );
             wait_or_cancel(cancel_token, std::time::Duration::from_secs(wait_secs as u64)).await;
         }
         None => {
@@ -707,14 +715,38 @@ async fn notify_portal_down(app: &AppHandle, config: &AutomationConfig, error: &
     .await;
 }
 
-/// Calculate adaptive heartbeat interval
+/// Antecedência com que o app "acorda" antes de uma batida distante: em vez de
+/// ficar verificando o portal a noite toda, dorme até ~3h antes da próxima
+/// batida (ex.: a entrada1 do dia seguinte) e só então passa a verificar.
+const WAKE_AHEAD_SECS: i64 = 3 * 3600;
+
+/// Intervalo adaptativo até a próxima verificação, dado quantos segundos faltam
+/// para a próxima batida. Longe → dorme até ~3h antes (evita polling de
+/// madrugada / o dia todo); perto → verifica com frequência crescente.
 fn calc_heartbeat_interval(secs_remaining: i64) -> i64 {
-    if secs_remaining > 300 {
-        300 // 5 minutes
+    if secs_remaining > WAKE_AHEAD_SECS + 1800 {
+        // Muito longe: dorme de uma vez até ~3h antes da batida.
+        secs_remaining - WAKE_AHEAD_SECS
+    } else if secs_remaining > 1800 {
+        900 // 15 min dentro da janela de ~3h
+    } else if secs_remaining > 300 {
+        300 // 5 min
     } else if secs_remaining > 60 {
-        60 // 1 minute
+        60 // 1 min
     } else {
-        secs_remaining.max(5) // At least 5 seconds
+        secs_remaining.max(5) // ao menos 5s
+    }
+}
+
+/// Formata uma duração em segundos de forma legível para o log.
+fn fmt_duration(secs: i64) -> String {
+    let s = secs.max(0);
+    if s >= 3600 {
+        format!("{}h{:02}min", s / 3600, (s % 3600) / 60)
+    } else if s >= 60 {
+        format!("{}min", s / 60)
+    } else {
+        format!("{}s", s)
     }
 }
 
@@ -881,5 +913,38 @@ fn emit_log_static(level: &str, message: &str) {
         "ERRO" => log::error!("{message}"),
         "AVISO" => log::warn!("{message}"),
         _ => log::info!("{message}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn heartbeat_sleeps_long_when_punch_is_far() {
+        // 14h até a próxima batida (madrugada → entrada1 do dia seguinte):
+        // dorme até ~3h antes, não fica verificando a noite toda.
+        let secs = 14 * 3600;
+        let wait = calc_heartbeat_interval(secs);
+        assert_eq!(wait, secs - WAKE_AHEAD_SECS); // acorda 3h antes
+        // 9h (esperando a saída no fim do dia): também dorme até 3h antes.
+        assert_eq!(calc_heartbeat_interval(9 * 3600), 9 * 3600 - WAKE_AHEAD_SECS);
+    }
+
+    #[test]
+    fn heartbeat_polls_more_often_when_close() {
+        assert_eq!(calc_heartbeat_interval(3 * 3600), 900); // dentro de ~3h → 15min
+        assert_eq!(calc_heartbeat_interval(1200), 300); // 20min → 5min
+        assert_eq!(calc_heartbeat_interval(120), 60); // 2min → 1min
+        assert_eq!(calc_heartbeat_interval(30), 30); // <1min → o que falta
+        assert_eq!(calc_heartbeat_interval(2), 5); // piso de 5s
+    }
+
+    #[test]
+    fn fmt_duration_is_readable() {
+        assert_eq!(fmt_duration(39600), "11h00min");
+        assert_eq!(fmt_duration(5400), "1h30min");
+        assert_eq!(fmt_duration(900), "15min");
+        assert_eq!(fmt_duration(45), "45s");
     }
 }
