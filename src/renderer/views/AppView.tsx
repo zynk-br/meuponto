@@ -52,12 +52,6 @@ const DayRowEditor: React.FC<{ day: DayOfWeek, entry: TimeEntry, onChange: (newE
   const handleTimeChange = (field: keyof Omit<TimeEntry, 'feriado'>, value: string) => {
     const updatedEntry = { ...entry, [field]: value };
 
-    // Preencher um horário implica que o dia é útil → desmarca feriado
-    // automaticamente (evita perder o horário por causa do flag de feriado).
-    if (value && updatedEntry.feriado) {
-      updatedEntry.feriado = false;
-    }
-
     // REGRA 1: Quando preencher Entrada1, calcular automaticamente Saída2 (Entrada1 + 9h)
     if (field === 'entrada1' && value) {
       const calculatedSaida2 = addHoursToTime(value, 9, 0); // 8h de trabalho + 1h de almoço
@@ -74,13 +68,9 @@ const DayRowEditor: React.FC<{ day: DayOfWeek, entry: TimeEntry, onChange: (newE
   };
 
   const handleFeriadoChange = (checked: boolean) => {
-    if (checked) {
-      // Marcar feriado: limpa os horários (não há batidas nesse dia).
-      onChange({ ...entry, feriado: true, entrada1: '', saida1: '', entrada2: '', saida2: '' });
-    } else {
-      // Desmarcar feriado: apenas reabilita o dia, SEM apagar o que já houver.
-      onChange({ ...entry, feriado: false });
-    }
+    // Igual ao Electron: feriado só desabilita o dia, NUNCA apaga os horários.
+    // Os valores ficam preservados e voltam ao desmarcar.
+    onChange({ ...entry, feriado: checked });
   };
 
   return (
@@ -88,9 +78,9 @@ const DayRowEditor: React.FC<{ day: DayOfWeek, entry: TimeEntry, onChange: (newE
       <td className="py-3 px-4 text-sm font-medium text-secondary-800 dark:text-secondary-200">{day}</td>
       {['entrada1', 'saida1', 'entrada2', 'saida2'].map((field) => {
         const isPreAssigned = preAssignedInterval && (field === 'saida1' || field === 'entrada2');
-        // Feriado NÃO desabilita mais o campo: digitar um horário desmarca o
-        // feriado (em handleTimeChange). Só bloqueia pré-assinalado / readonly.
-        const isDisabled = readonly || isPreAssigned;
+        // Igual ao Electron: feriado desabilita os campos (mas preserva os
+        // valores). Para editar um dia de feriado, desmarque-o primeiro.
+        const isDisabled = readonly || isPreAssigned || entry.feriado;
         return (
           <td key={field} className="py-2 px-3">
             <input
@@ -104,7 +94,7 @@ const DayRowEditor: React.FC<{ day: DayOfWeek, entry: TimeEntry, onChange: (newE
               disabled={isDisabled}
               readOnly={readonly}
               title={isPreAssigned ? 'Intervalo pré-assinalado (fixo)' : undefined}
-              className={`w-full p-2 border rounded-md text-sm focus:ring-primary-500 focus:border-primary-500 ${isPreAssigned
+              className={`w-full p-2 border rounded-md text-sm focus:ring-primary-500 focus:border-primary-500 ${(isPreAssigned || entry.feriado)
                 ? 'bg-secondary-200 dark:bg-secondary-900 border-secondary-400 dark:border-secondary-700 cursor-not-allowed opacity-70'
                 : readonly
                   ? 'bg-transparent border-secondary-300 dark:border-secondary-600 cursor-not-allowed'
