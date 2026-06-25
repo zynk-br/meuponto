@@ -368,7 +368,19 @@ async fn automation_heartbeat_loop(
                     let _ = plan.save(app);
                     plan.archive(app);
                 }
-                emit_status(app, true, "Todas as batidas de hoje registradas.", None);
+                if plan.punches.is_empty() {
+                    emit_log(
+                        app,
+                        "AVISO",
+                        &format!(
+                            "Hoje ({}) não tem horários configurados na agenda — nenhuma batida hoje.",
+                            plan.day_key
+                        ),
+                    );
+                    emit_status(app, true, "Hoje sem horários configurados.", None);
+                } else {
+                    emit_status(app, true, "Todas as batidas de hoje registradas.", None);
+                }
                 session = Some(page);
                 wait_for_next_lookahead(app, config, &existing_points, cancel_token).await;
                 continue;
