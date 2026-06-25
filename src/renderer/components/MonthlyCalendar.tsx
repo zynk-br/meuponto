@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { MonthlySchedule, MonthlyDayEntry } from '../types';
+import TimeInput from './TimeInput';
 
 interface MonthlyCalendarProps {
   monthlySchedule: MonthlySchedule;
@@ -87,39 +88,35 @@ const MonthlyCalendar: React.FC<MonthlyCalendarProps> = ({ monthlySchedule, onUp
 
           {!isWeekend && !dayEntry.feriado && (
             <div className="space-y-1">
-              <input
-                type="time"
+              <TimeInput
                 value={dayEntry.entrada1}
-                onChange={(e) => onUpdateDay(dateKey, { ...dayEntry, entrada1: e.target.value })}
+                onChange={(v) => onUpdateDay(dateKey, { ...dayEntry, entrada1: v })}
                 disabled={readonly}
                 placeholder="E1"
-                className={`w-full px-1 py-0.5 text-xs border rounded ${readonly ? 'bg-secondary-200 dark:bg-secondary-900 border-secondary-400 dark:border-secondary-700 cursor-not-allowed opacity-70' : 'bg-transparent border-gray-300 dark:border-gray-600'}`}
+                className={`w-full px-1 py-0.5 text-xs text-center border rounded ${readonly ? 'bg-secondary-200 dark:bg-secondary-900 border-secondary-400 dark:border-secondary-700 cursor-not-allowed opacity-70' : 'bg-transparent border-gray-300 dark:border-gray-600'}`}
               />
-              <input
-                type="time"
+              <TimeInput
                 value={(preAssignedInterval) ? '12:00' : dayEntry.saida1}
-                onChange={(e) => onUpdateDay(dateKey, { ...dayEntry, saida1: e.target.value })}
+                onChange={(v) => onUpdateDay(dateKey, { ...dayEntry, saida1: v })}
                 disabled={readonly || (preAssignedInterval === true)}
                 placeholder="S1"
                 title={preAssignedInterval ? 'Intervalo pré-assinalado (fixo)' : undefined}
-                className={`w-full px-1 py-0.5 text-xs border rounded ${preAssignedInterval ? 'bg-secondary-200 dark:bg-secondary-900 border-secondary-400 dark:border-secondary-700 cursor-not-allowed opacity-70' : readonly ? 'bg-secondary-200 dark:bg-secondary-900 border-secondary-400 dark:border-secondary-700 cursor-not-allowed opacity-70' : 'bg-transparent border-gray-300 dark:border-gray-600'}`}
+                className={`w-full px-1 py-0.5 text-xs text-center border rounded ${preAssignedInterval ? 'bg-secondary-200 dark:bg-secondary-900 border-secondary-400 dark:border-secondary-700 cursor-not-allowed opacity-70' : readonly ? 'bg-secondary-200 dark:bg-secondary-900 border-secondary-400 dark:border-secondary-700 cursor-not-allowed opacity-70' : 'bg-transparent border-gray-300 dark:border-gray-600'}`}
               />
-              <input
-                type="time"
+              <TimeInput
                 value={(preAssignedInterval) ? '13:00' : dayEntry.entrada2}
-                onChange={(e) => onUpdateDay(dateKey, { ...dayEntry, entrada2: e.target.value })}
+                onChange={(v) => onUpdateDay(dateKey, { ...dayEntry, entrada2: v })}
                 disabled={readonly || (preAssignedInterval === true)}
                 placeholder="E2"
                 title={preAssignedInterval ? 'Intervalo pré-assinalado (fixo)' : undefined}
-                className={`w-full px-1 py-0.5 text-xs border rounded ${preAssignedInterval ? 'bg-secondary-200 dark:bg-secondary-900 border-secondary-400 dark:border-secondary-700 cursor-not-allowed opacity-70' : readonly ? 'bg-secondary-200 dark:bg-secondary-900 border-secondary-400 dark:border-secondary-700 cursor-not-allowed opacity-70' : 'bg-transparent border-gray-300 dark:border-gray-600'}`}
+                className={`w-full px-1 py-0.5 text-xs text-center border rounded ${preAssignedInterval ? 'bg-secondary-200 dark:bg-secondary-900 border-secondary-400 dark:border-secondary-700 cursor-not-allowed opacity-70' : readonly ? 'bg-secondary-200 dark:bg-secondary-900 border-secondary-400 dark:border-secondary-700 cursor-not-allowed opacity-70' : 'bg-transparent border-gray-300 dark:border-gray-600'}`}
               />
-              <input
-                type="time"
+              <TimeInput
                 value={dayEntry.saida2}
-                onChange={(e) => onUpdateDay(dateKey, { ...dayEntry, saida2: e.target.value })}
+                onChange={(v) => onUpdateDay(dateKey, { ...dayEntry, saida2: v })}
                 disabled={readonly}
                 placeholder="S2"
-                className={`w-full px-1 py-0.5 text-xs border rounded ${readonly ? 'bg-secondary-200 dark:bg-secondary-900 border-secondary-400 dark:border-secondary-700 cursor-not-allowed opacity-70' : 'bg-transparent border-gray-300 dark:border-gray-600'}`}
+                className={`w-full px-1 py-0.5 text-xs text-center border rounded ${readonly ? 'bg-secondary-200 dark:bg-secondary-900 border-secondary-400 dark:border-secondary-700 cursor-not-allowed opacity-70' : 'bg-transparent border-gray-300 dark:border-gray-600'}`}
               />
             </div>
           )}
