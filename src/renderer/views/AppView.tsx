@@ -34,6 +34,7 @@ function loadPersistedSchedules(): PersistedSchedules {
 import MonthlyCalendar from '../components/MonthlyCalendar';
 import ConfirmDialog from '../components/ConfirmDialog';
 import * as tauriAPI from '../hooks/useTauriAPI';
+import TimeInput, { isCompleteTime } from '../components/TimeInput';
 
 const DayRowEditor: React.FC<{ day: DayOfWeek, entry: TimeEntry, onChange: (newEntry: TimeEntry) => void, readonly: boolean, preAssignedInterval?: boolean }> = ({ day, entry, onChange, readonly, preAssignedInterval }) => {
 
@@ -52,16 +53,14 @@ const DayRowEditor: React.FC<{ day: DayOfWeek, entry: TimeEntry, onChange: (newE
   const handleTimeChange = (field: keyof Omit<TimeEntry, 'feriado'>, value: string) => {
     const updatedEntry = { ...entry, [field]: value };
 
-    // REGRA 1: Quando preencher Entrada1, calcular automaticamente Saída2 (Entrada1 + 9h)
-    if (field === 'entrada1' && value) {
-      const calculatedSaida2 = addHoursToTime(value, 9, 0); // 8h de trabalho + 1h de almoço
-      updatedEntry.saida2 = calculatedSaida2;
+    // REGRA 1: Ao completar a Entrada1, calcular automaticamente a Saída2 (+9h).
+    if (field === 'entrada1' && isCompleteTime(value)) {
+      updatedEntry.saida2 = addHoursToTime(value, 9, 0); // 8h de trabalho + 1h de almoço
     }
 
-    // REGRA 2: Quando preencher Saída1, calcular automaticamente Entrada2 (Saída1 + 1h)
-    if (field === 'saida1' && value) {
-      const calculatedEntrada2 = addHoursToTime(value, 1, 0); // 1h de almoço
-      updatedEntry.entrada2 = calculatedEntrada2;
+    // REGRA 2: Ao completar a Saída1, calcular automaticamente a Entrada2 (+1h).
+    if (field === 'saida1' && isCompleteTime(value)) {
+      updatedEntry.entrada2 = addHoursToTime(value, 1, 0); // 1h de almoço
     }
 
     onChange(updatedEntry);
@@ -83,18 +82,16 @@ const DayRowEditor: React.FC<{ day: DayOfWeek, entry: TimeEntry, onChange: (newE
         const isDisabled = readonly || isPreAssigned || entry.feriado;
         return (
           <td key={field} className="py-2 px-3">
-            <input
-              type="time"
+            <TimeInput
               value={
                 isPreAssigned
                   ? (field === 'saida1' ? '12:00' : '13:00')
                   : entry[field as keyof Omit<TimeEntry, 'feriado'>]
               }
-              onChange={(e) => handleTimeChange(field as keyof Omit<TimeEntry, 'feriado'>, e.target.value)}
+              onChange={(v) => handleTimeChange(field as keyof Omit<TimeEntry, 'feriado'>, v)}
               disabled={isDisabled}
-              readOnly={readonly}
               title={isPreAssigned ? 'Intervalo pré-assinalado (fixo)' : undefined}
-              className={`w-full p-2 border rounded-md text-sm focus:ring-primary-500 focus:border-primary-500 ${(isPreAssigned || entry.feriado)
+              className={`w-24 p-2 text-center border rounded-md text-sm focus:ring-primary-500 focus:border-primary-500 ${(isPreAssigned || entry.feriado)
                 ? 'bg-secondary-200 dark:bg-secondary-900 border-secondary-400 dark:border-secondary-700 cursor-not-allowed opacity-70'
                 : readonly
                   ? 'bg-transparent border-secondary-300 dark:border-secondary-600 cursor-not-allowed'
