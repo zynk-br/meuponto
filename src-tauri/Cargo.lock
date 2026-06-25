@@ -2614,7 +2614,7 @@ dependencies = [
 
 [[package]]
 name = "meu-ponto"
-version = "3.0.8"
+version = "3.0.9"
 dependencies = [
  "chromiumoxide",
  "chrono",
