@@ -531,18 +531,39 @@ fn load_or_build_plan(
 ) -> Option<DayPlan> {
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
 
-    if let Some(plan) = DayPlan::load(app, config.dry_run) {
-        if plan.date == today && plan.pre_assigned_interval == config.pre_assigned_interval {
-            return Some(plan);
-        }
-    }
-
-    DayPlan::build_for_today(
+    // Plano novo a partir da agenda ATUAL (capta edições feitas após o início).
+    let fresh = DayPlan::build_for_today(
         &config.schedule,
         existing_points,
         config.pre_assigned_interval,
         config.dry_run,
-    )
+    );
+
+    // Reaproveita o plano salvo de hoje SOMENTE se ele ainda casa com a agenda
+    // atual (mesmas batidas e horários crus) — preservando status/reschedule.
+    // Se a agenda mudou (ex.: o usuário configurou um dia que antes estava
+    // vazio), usa o plano novo — evita que um dayPlan vazio em cache "trave" o
+    // dia inteiro mesmo com a agenda já preenchida.
+    if let (Some(saved), Some(fresh_plan)) = (DayPlan::load(app, config.dry_run), fresh.as_ref()) {
+        if saved.date == today
+            && saved.pre_assigned_interval == config.pre_assigned_interval
+            && same_punch_structure(&saved, fresh_plan)
+        {
+            return Some(saved);
+        }
+    }
+
+    fresh
+}
+
+/// Verdadeiro quando dois planos têm a mesma estrutura de batidas (mesmos tipos
+/// e horários crus da agenda) — indicando que a agenda do dia não mudou.
+fn same_punch_structure(a: &DayPlan, b: &DayPlan) -> bool {
+    a.punches.len() == b.punches.len()
+        && a.punches
+            .iter()
+            .zip(b.punches.iter())
+            .all(|(x, y)| x.punch_type == y.punch_type && x.original_time == y.original_time)
 }
 
 /// Simulação one-shot do dia (dry-run): login + sync reais (read-only), monta o
@@ -958,5 +979,26 @@ mod tests {
         assert_eq!(fmt_duration(5400), "1h30min");
         assert_eq!(fmt_duration(900), "15min");
         assert_eq!(fmt_duration(45), "45s");
+    }
+
+    #[test]
+    fn rebuilds_plan_when_schedule_changes() {
+        use crate::automation::day_plan::DayPlan;
+        use serde_json::json;
+        let empty = json!({"entrada1":"","saida1":"","entrada2":"","saida2":"","feriado":false});
+        let conf = json!({"entrada1":"07:30","saida1":"12:00","entrada2":"13:00","saida2":"16:30","feriado":false});
+
+        // Plano vazio (dia sem horários) vs plano configurado: estrutura DIFERENTE
+        // → o cache vazio NÃO deve ser reaproveitado, força reconstrução.
+        let plan_empty = DayPlan::build("2026-06-25", "Quinta-feira", &empty, &[], true, false, "now");
+        let plan_conf = DayPlan::build("2026-06-25", "Quinta-feira", &conf, &[], true, false, "now");
+        assert!(!same_punch_structure(&plan_empty, &plan_conf));
+
+        // Mesma agenda, com um ponto real já registrado: estrutura IGUAL (o
+        // anchoring muda planned_time, não original_time) → reaproveita o cache.
+        let plan_conf_pts = DayPlan::build(
+            "2026-06-25", "Quinta-feira", &conf, &["07:32".to_string()], true, false, "now",
+        );
+        assert!(same_punch_structure(&plan_conf, &plan_conf_pts));
     }
 }
