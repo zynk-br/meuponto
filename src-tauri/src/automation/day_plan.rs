@@ -32,6 +32,26 @@ fn store_key(dry_run: bool) -> &'static str {
 /// Tolerância (em minutos) para casar uma batida planejada com um ponto real.
 pub const TOLERANCE_MINUTES: i32 = 5;
 
+/// Carência (minutos) antes de o reconcile reverter uma batida marcada como
+/// Registered mas sem respaldo no portal. Evita corrida com um ponto recém-
+/// batido que ainda não apareceu na sincronização.
+const REVERT_GRACE_MINUTES: i64 = 3;
+
+/// Verdadeiro se a batida foi registrada há mais de `REVERT_GRACE_MINUTES`
+/// (ou se não há timestamp). Usado para reverter com segurança rótulos errados
+/// sem desfazer uma batida que acabou de acontecer.
+fn registered_long_ago(p: &PlannedPunch, now_iso: &str) -> bool {
+    match (
+        p.registered_at
+            .as_deref()
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok()),
+        chrono::DateTime::parse_from_rfc3339(now_iso).ok(),
+    ) {
+        (Some(reg), Some(now)) => (now - reg).num_minutes() >= REVERT_GRACE_MINUTES,
+        _ => true,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PunchStatus {
     /// Ainda não tentada / aguardando o horário.
@@ -91,6 +111,26 @@ pub struct DayPlan {
 /// Lê um campo de horário ("HH:MM") da entrada de agenda; "" se ausente.
 fn field<'a>(entry: &'a serde_json::Value, key: &str) -> &'a str {
     entry.get(key).and_then(|v| v.as_str()).unwrap_or("")
+}
+
+/// Remove pontos duplicados/quase-iguais: dois pontos a menos de `TOLERANCE_MINUTES`
+/// um do outro são a MESMA batida física (o portal às vezes registra uma batida
+/// em duplicidade). Como batidas de tipos diferentes — entrada1/saída1/entrada2/
+/// saída2 — nunca acontecem no mesmo minuto, colapsar pontos próximos é seguro e
+/// evita que um ponto duplicado seja interpretado como a batida seguinte (ex.: um
+/// 2º ponto de entrada1 às 08:54 ser tratado como saída2). Retorna ordenado.
+pub fn dedup_points(points: &[String]) -> Vec<String> {
+    let mut mins: Vec<i32> = points.iter().filter_map(|p| parse_time_minutes(p)).collect();
+    mins.sort_unstable();
+    let mut out: Vec<String> = Vec::new();
+    let mut last: Option<i32> = None;
+    for m in mins {
+        if last.map_or(true, |l| (m - l).abs() > TOLERANCE_MINUTES) {
+            out.push(format!("{:02}:{:02}", m / 60, m % 60));
+            last = Some(m);
+        }
+    }
+    out
 }
 
 /// Verifica se `target` casa com algum ponto da lista (tolerância ±N min).
@@ -230,18 +270,31 @@ impl DayPlan {
         pts.sort_unstable();
 
         for (i, p) in self.punches.iter_mut().enumerate() {
-            let real_min = match pts.get(i) {
-                Some(&m) => m,
-                None => break, // sem ponto real para esta batida (ainda pendente)
-            };
-            if p.status != PunchStatus::Registered {
-                p.status = PunchStatus::Registered;
-                if p.registered_at.is_none() {
-                    p.registered_at = Some(now_iso.to_string());
+            match pts.get(i) {
+                Some(&real_min) => {
+                    if p.status != PunchStatus::Registered {
+                        p.status = PunchStatus::Registered;
+                        if p.registered_at.is_none() {
+                            p.registered_at = Some(now_iso.to_string());
+                        }
+                    }
+                    // Reflete o horário REAL (para summary/auditoria e re-anchoring).
+                    p.planned_time = crate::utils::time::minutes_to_time_string(real_min);
+                }
+                None => {
+                    // Sem ponto real para esta batida no portal. Se ela estava
+                    // marcada como Registered sem respaldo (ex.: rótulo errado de
+                    // um ponto duplicado, agora removido pelo dedup), reverte para
+                    // Pendente — a batida real ainda precisa acontecer. Reverte
+                    // só após uma carência, para não brigar com um ponto recém-
+                    // batido que ainda não apareceu no sync. Re-batida é segura:
+                    // o pre-check de perform_punch pula se o horário já existir.
+                    if p.status == PunchStatus::Registered && registered_long_ago(p, now_iso) {
+                        p.status = PunchStatus::Pending;
+                        p.registered_at = None;
+                    }
                 }
             }
-            // Reflete o horário REAL (para summary/auditoria e re-anchoring).
-            p.planned_time = crate::utils::time::minutes_to_time_string(real_min);
         }
 
         self.reanchor_pending();
@@ -571,6 +624,73 @@ mod tests {
         );
         assert!(plan.invalid);
         assert!(plan.invalid_reason.is_some());
+    }
+
+    #[test]
+    fn dedup_collapses_near_duplicates() {
+        // Duas batidas de entrada1 às 08:54 (duplicata do portal) → uma só.
+        assert_eq!(dedup_points(&["08:54".into(), "08:54".into()]), vec!["08:54"]);
+        // Dentro da tolerância (±5min) também colapsa.
+        assert_eq!(dedup_points(&["08:54".into(), "08:57".into()]), vec!["08:54"]);
+        // Batidas reais distantes não são afetadas (mantém ordenado).
+        assert_eq!(
+            dedup_points(&["17:54".into(), "08:54".into()]),
+            vec!["08:54", "17:54"]
+        );
+    }
+
+    #[test]
+    fn reconcile_ignores_duplicate_entrada1_point() {
+        // Pré-assinalado: batidas = [entrada1, saida2]. Portal com entrada1
+        // duplicada (08:54 e 08:54) NÃO pode marcar a saída2 como registrada.
+        let d = day("08:54", "12:00", "13:00", "17:54");
+        let mut plan = DayPlan::build("2026-06-26", "Sexta-feira", &d, &[], true, false, "now");
+        let pts = dedup_points(&["08:54".into(), "08:54".into()]);
+        plan.reconcile(&pts, "ts");
+        let e1 = plan.punches.iter().find(|p| p.punch_type == "entrada1").unwrap();
+        let s2 = plan.punches.iter().find(|p| p.punch_type == "saida2").unwrap();
+        assert_eq!(e1.status, PunchStatus::Registered);
+        assert_eq!(e1.planned_time, "08:54");
+        assert_eq!(s2.status, PunchStatus::Pending); // NÃO registrada
+        assert_eq!(s2.planned_time, "17:54"); // reancorada para o fim do dia
+    }
+
+    #[test]
+    fn reconcile_self_heals_mislabeled_saida2() {
+        // Estado corrompido: saida2 marcada Registered às 08:54 (rótulo errado de
+        // uma entrada1 duplicada). Com o portal mostrando só [08:54] (deduped) e
+        // já passada a carência, o reconcile deve reverter saida2 para Pendente e
+        // reancorar para 17:54 — para que a saída real às 17:54 ainda aconteça.
+        let d = day("08:54", "12:00", "13:00", "17:54");
+        let mut plan = DayPlan::build("2026-06-26", "Sexta-feira", &d, &[], true, false, "2026-06-26T08:54:00-03:00");
+        // simula a corrupção
+        for p in plan.punches.iter_mut() {
+            p.status = PunchStatus::Registered;
+            p.planned_time = "08:54".to_string();
+            p.registered_at = Some("2026-06-26T08:54:29-03:00".to_string());
+        }
+        plan.reconcile(&["08:54".to_string()], "2026-06-26T09:10:00-03:00");
+        let e1 = plan.punches.iter().find(|p| p.punch_type == "entrada1").unwrap();
+        let s2 = plan.punches.iter().find(|p| p.punch_type == "saida2").unwrap();
+        assert_eq!(e1.status, PunchStatus::Registered);
+        assert_eq!(e1.planned_time, "08:54");
+        assert_eq!(s2.status, PunchStatus::Pending); // revertida
+        assert_eq!(s2.planned_time, "17:54"); // reancorada
+    }
+
+    #[test]
+    fn reconcile_keeps_recent_punch_within_grace() {
+        // Batida recém-registrada (segundos atrás) que ainda não apareceu no sync
+        // NÃO deve ser revertida — evita corrida/dupla batida.
+        let d = day("08:54", "12:00", "13:00", "17:54");
+        let mut plan = DayPlan::build("2026-06-26", "Sexta-feira", &d, &[], true, false, "2026-06-26T08:54:00-03:00");
+        let e1 = plan.punches.iter_mut().find(|p| p.punch_type == "entrada1").unwrap();
+        e1.status = PunchStatus::Registered;
+        e1.registered_at = Some("2026-06-26T08:54:29-03:00".to_string());
+        // sync vazio, mas só 30s depois → dentro da carência → mantém Registered.
+        plan.reconcile(&[], "2026-06-26T08:54:59-03:00");
+        let e1 = plan.punches.iter().find(|p| p.punch_type == "entrada1").unwrap();
+        assert_eq!(e1.status, PunchStatus::Registered);
     }
 
     #[test]
