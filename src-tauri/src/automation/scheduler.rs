@@ -316,7 +316,9 @@ async fn automation_heartbeat_loop(
             }
             PortalOp::Done(r) => {
                 portal_failures = 0;
-                r.unwrap_or_default()
+                // Dedup na fonte: pontos duplicados (mesma batida registrada 2x
+                // no portal) nunca devem ser tratados como batidas distintas.
+                crate::automation::day_plan::dedup_points(&r.unwrap_or_default())
             }
         };
         // A página fica viva entre ciclos: nos caminhos sem batida ela é
@@ -585,7 +587,7 @@ async fn simulate_day(
         Ok(page) => {
             let pts = portal::sync_initial_points(&page, app).await.unwrap_or_default();
             let _ = page.close().await;
-            pts
+            crate::automation::day_plan::dedup_points(&pts)
         }
         Err(e) => {
             emit_log(app, "AVISO", &format!("{PFX}Sem acesso ao portal ({e}); simulando sem pontos já registrados."));
