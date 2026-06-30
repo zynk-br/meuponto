@@ -236,6 +236,87 @@ pub async fn reuse_session(page: &Page, app: &AppHandle) -> Result<bool, String>
     }
 }
 
+/// Faz uma única varredura do DOM e retorna os horários de HOJE já registrados
+/// (sem espera/retry). Reutilizado pelo sync (com retry) e pelo re-check rápido.
+async fn scrape_today_points(page: &Page, today_str: &str) -> Result<Vec<String>, String> {
+    let js = format!(
+        r#"
+        (() => {{
+            const todayDD_MM = "{}";
+
+            function parse12hTo24h(timeStr) {{
+                const match = timeStr.match(/(\d{{1,2}}):(\d{{2}})\s*(AM|PM)/i);
+                if (!match) return null;
+                let h = parseInt(match[1]);
+                const m = match[2];
+                const ampm = match[3].toUpperCase();
+                if (ampm === 'PM' && h !== 12) h += 12;
+                if (ampm === 'AM' && h === 12) h = 0;
+                return String(h).padStart(2, '0') + ':' + m;
+            }}
+
+            const entries = [];
+            const statusEls = document.querySelectorAll('[id^="status-processamento-"]');
+            statusEls.forEach(statusEl => {{
+                const timeElement = statusEl.previousElementSibling;
+                if (!timeElement || !timeElement.textContent) return;
+                const fullText = timeElement.textContent.trim();
+
+                const ptMatch = fullText.match(/(\d{{2}}\/\d{{2}})\s*-\s*(\d{{2}}:\d{{2}})/);
+                if (ptMatch) {{ entries.push({{ date: ptMatch[1], time: ptMatch[2] }}); return; }}
+
+                const enMatch = fullText.match(/(\d{{2}}\/\d{{2}})\s*-\s*(\d{{1,2}}:\d{{2}}\s*[APap][Mm])/);
+                if (enMatch) {{
+                    const converted = parse12hTo24h(enMatch[2]);
+                    if (converted) {{
+                        const mParts = enMatch[1].split('/');
+                        entries.push({{ date: mParts[1] + '/' + mParts[0], time: converted }});
+                    }}
+                    return;
+                }}
+            }});
+
+            const todayPunches = entries.filter(e => e.date === todayDD_MM).map(e => e.time).sort();
+            return JSON.stringify({{ found: todayPunches }});
+        }})()
+    "#,
+        today_str
+    );
+
+    let result: String = page
+        .evaluate(js.as_str())
+        .await
+        .map_err(|e| format!("Erro ao executar JS: {e}"))?
+        .into_value()
+        .map_err(|e| format!("Erro ao converter resultado: {e}"))?;
+
+    let parsed: serde_json::Value = serde_json::from_str(&result).unwrap_or_default();
+    Ok(parsed
+        .get("found")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default())
+}
+
+/// Varredura RÁPIDA usada imediatamente antes de clicar, para detectar uma
+/// batida recém-feita (ex.: manual pelo usuário) sem pagar o retry completo do
+/// sync. Faz até 2 passadas curtas (a SPA pode levar alguns segundos para
+/// renderizar) e retorna os horários de hoje ([] em erro). Para assim que
+/// encontra `target`.
+async fn quick_scrape_points(page: &Page, target: &str) -> Vec<String> {
+    let today_str = chrono::Local::now().format("%d/%m").to_string();
+    let mut last: Vec<String> = Vec::new();
+    for wait_ms in [2000u64, 2500] {
+        sleep(Duration::from_millis(wait_ms)).await;
+        if let Ok(pts) = scrape_today_points(page, &today_str).await {
+            if time_exists_with_tolerance(&pts, target, 5) {
+                return pts;
+            }
+            last = pts;
+        }
+    }
+    last
+}
+
 /// Scrape existing punch entries from the portal page
 pub async fn sync_initial_points(
     page: &Page,
@@ -256,111 +337,12 @@ pub async fn sync_initial_points(
         };
         sleep(Duration::from_millis(wait_ms)).await;
 
-        // First, debug: check what selectors exist on the page
-        let debug_info: String = page
-            .evaluate(
-                r#"
-                (() => {
-                    const statusEls = document.querySelectorAll('[id^="status-processamento-"]');
-                    const allTextEls = document.querySelectorAll('.registro-ponto, .ponto-item, [class*="ponto"], [class*="registro"]');
-
-                    // Broader search: look for any element containing date/time patterns
-                    const body = document.body ? document.body.innerText.substring(0, 2000) : 'NO BODY';
-
-                    return JSON.stringify({
-                        statusCount: statusEls.length,
-                        classMatchCount: allTextEls.length,
-                        bodyPreview: body.substring(0, 500),
-                        url: window.location.href
-                    });
-                })()
-                "#,
-            )
-            .await
-            .map_err(|e| format!("Erro debug JS: {e}"))?
-            .into_value()
-            .map_err(|e| format!("Erro converter debug: {e}"))?;
-
-        emit_log(app, "DEBUG", &format!("Tentativa {attempt} - DOM debug: {debug_info}"));
-
-        // Try the original selector approach, handling both pt-BR (DD/MM 24h) and en-US (MM/DD 12h) formats
-        let js = format!(
-            r#"
-            (() => {{
-                const todayDD_MM = "{}";
-                const parts = todayDD_MM.split('/');
-                const todayMM_DD = parts[1] + '/' + parts[0]; // flip to MM/DD for en-US
-
-                function parse12hTo24h(timeStr) {{
-                    // Convert "7:52 AM" or "3:09 PM" to "07:52" or "15:09"
-                    const match = timeStr.match(/(\d{{1,2}}):(\d{{2}})\s*(AM|PM)/i);
-                    if (!match) return null;
-                    let h = parseInt(match[1]);
-                    const m = match[2];
-                    const ampm = match[3].toUpperCase();
-                    if (ampm === 'PM' && h !== 12) h += 12;
-                    if (ampm === 'AM' && h === 12) h = 0;
-                    return String(h).padStart(2, '0') + ':' + m;
-                }}
-
-                const entries = [];
-
-                const statusEls = document.querySelectorAll('[id^="status-processamento-"]');
-                statusEls.forEach(statusEl => {{
-                    const timeElement = statusEl.previousElementSibling;
-                    if (!timeElement || !timeElement.textContent) return;
-                    const fullText = timeElement.textContent.trim();
-
-                    // Try pt-BR format: "13/04 - 07:52"
-                    const ptMatch = fullText.match(/(\d{{2}}\/\d{{2}})\s*-\s*(\d{{2}}:\d{{2}})/);
-                    if (ptMatch) {{
-                        entries.push({{ date: ptMatch[1], time: ptMatch[2], format: 'pt' }});
-                        return;
-                    }}
-
-                    // Try en-US format: "04/13 - 7:52 AM"
-                    const enMatch = fullText.match(/(\d{{2}}\/\d{{2}})\s*-\s*(\d{{1,2}}:\d{{2}}\s*[APap][Mm])/);
-                    if (enMatch) {{
-                        const converted = parse12hTo24h(enMatch[2]);
-                        if (converted) {{
-                            // Convert MM/DD to DD/MM
-                            const mParts = enMatch[1].split('/');
-                            const ddmm = mParts[1] + '/' + mParts[0];
-                            entries.push({{ date: ddmm, time: converted, format: 'en' }});
-                        }}
-                        return;
-                    }}
-                }});
-
-                const todayPunches = entries
-                    .filter(e => e.date === todayDD_MM)
-                    .map(e => e.time)
-                    .sort();
-
-                return JSON.stringify({{ found: todayPunches, totalEntries: entries.length }});
-            }})()
-        "#,
-            today_str
-        );
-
-        let result: String = page
-            .evaluate(js.as_str())
-            .await
-            .map_err(|e| format!("Erro ao executar JS: {e}"))?
-            .into_value()
-            .map_err(|e| format!("Erro ao converter resultado: {e}"))?;
-
-        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap_or_default();
-        let punches: Vec<String> = parsed
-            .get("found")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default();
-        let total_entries = parsed.get("totalEntries").and_then(|v| v.as_i64()).unwrap_or(0);
+        let punches = scrape_today_points(page, &today_str).await?;
 
         emit_log(
             app,
             "DEBUG",
-            &format!("Tentativa {attempt}: {total_entries} entradas totais, {} de hoje", punches.len()),
+            &format!("Tentativa {attempt}: {} ponto(s) de hoje", punches.len()),
         );
 
         if !punches.is_empty() || attempt == 3 {
@@ -400,17 +382,29 @@ pub async fn perform_punch(
         &format!("Tentando registrar ponto: {punch_type} às {punch_time}"),
     );
 
-    // Pre-check: reaproveita os pontos já sincronizados quando disponíveis
-    // (evita um sync redundante logo após o sync do heartbeat); senão sincroniza.
-    let pre_check: Vec<String> = match known_points {
-        Some(p) => p.to_vec(),
-        None => sync_initial_points(page, app).await?,
-    };
+    // Skip rápido: se os pontos já conhecidos (sync do heartbeat) mostram a
+    // batida registrada, nem sincroniza de novo.
+    if let Some(k) = known_points {
+        if time_exists_with_tolerance(k, punch_time, 5) {
+            emit_log(
+                app,
+                "AVISO",
+                &format!("Ponto {punch_type} às {punch_time} JÁ ESTÁ REGISTRADO. Pulando."),
+            );
+            return Ok(());
+        }
+    }
+
+    // Re-check RÁPIDO imediatamente antes de clicar. Crucial: pega uma batida
+    // MANUAL recém-feita pelo usuário que ainda não estava no sync do heartbeat
+    // (a janela de corrida que fazia o app registrar a entrada1 em duplicidade).
+    // Nunca confiamos só no `known` para decidir clicar.
+    let pre_check = quick_scrape_points(page, punch_time).await;
     if time_exists_with_tolerance(&pre_check, punch_time, 5) {
         emit_log(
             app,
             "AVISO",
-            &format!("Ponto {punch_type} às {punch_time} JÁ ESTÁ REGISTRADO. Pulando."),
+            &format!("Ponto {punch_type} às {punch_time} já consta no portal (verificação imediata). Pulando."),
         );
         return Ok(());
     }
