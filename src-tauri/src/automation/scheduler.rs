@@ -258,7 +258,7 @@ async fn automation_heartbeat_loop(
                     emit_log(app, "AVISO", "Falhas repetidas de acesso ao portal. Reiniciando o navegador...");
                     return Ok(LoopOutcome::NeedsBrowserRestart);
                 }
-                wait_or_cancel(cancel_token, std::time::Duration::from_secs(PORTAL_DOWN_BACKOFF_SECS)).await;
+                wait_wallclock_or_cancel(app, cancel_token, PORTAL_DOWN_BACKOFF_SECS as i64).await;
                 continue;
             }};
         }
@@ -397,7 +397,7 @@ async fn automation_heartbeat_loop(
             None => {
                 emit_log(app, "ERRO", &format!("Horário inválido para {}: {}", punch.punch_type, punch.planned_time));
                 session = Some(page);
-                wait_or_cancel(cancel_token, std::time::Duration::from_secs(300)).await;
+                wait_wallclock_or_cancel(app, cancel_token, 300).await;
                 continue;
             }
         };
@@ -412,7 +412,7 @@ async fn automation_heartbeat_loop(
                 &format!("Próxima verificação em {} para {} @ {}", fmt_duration(wait_secs), punch.punch_type, punch.planned_time),
             );
             session = Some(page);
-            wait_or_cancel(cancel_token, std::time::Duration::from_secs(wait_secs as u64)).await;
+            wait_wallclock_or_cancel(app, cancel_token, wait_secs).await;
             continue; // re-sincroniza e reavalia
         }
 
@@ -706,12 +706,12 @@ async fn wait_for_next_lookahead(
                     p.day_key, p.punch_type, p.time, fmt_duration(secs), fmt_duration(wait_secs)
                 ),
             );
-            wait_or_cancel(cancel_token, std::time::Duration::from_secs(wait_secs as u64)).await;
+            wait_wallclock_or_cancel(app, cancel_token, wait_secs).await;
         }
         None => {
             emit_log(app, "INFO", "Nenhuma batida próxima. Verificando novamente em 30 minutos.");
             emit_status(app, true, "Sem batidas pendentes. Aguardando...", None);
-            wait_or_cancel(cancel_token, std::time::Duration::from_secs(1800)).await;
+            wait_wallclock_or_cancel(app, cancel_token, 1800).await;
         }
     }
 }
@@ -790,6 +790,60 @@ async fn wait_or_cancel(token: &CancellationToken, duration: std::time::Duration
     tokio::select! {
         _ = token.cancelled() => {}
         _ = tokio::time::sleep(duration) => {}
+    }
+}
+
+/// Tamanho da fatia da espera por relógio de parede: também é o atraso máximo
+/// com que uma suspensão do app/sistema é percebida após ele voltar a rodar.
+const WALLCLOCK_CHUNK_SECS: i64 = 30;
+
+/// Espera `total_secs` medindo pelo RELÓGIO DE PAREDE, em fatias curtas.
+/// Um `sleep` único do tokio conta pelo relógio monotônico, que congela quando
+/// o processo é suspenso (App Nap, pressão de memória) ou o sistema dorme —
+/// uma espera de horas "esticaria" pelo tempo suspenso e a batida se perderia.
+/// Aqui o restante é recalculado a cada fatia a partir de `Local::now()`, então
+/// após qualquer suspensão a espera se corrige em até ~30s.
+async fn wait_wallclock_or_cancel(app: &AppHandle, token: &CancellationToken, total_secs: i64) {
+    wait_wallclock_chunked(token, total_secs, |stalled| {
+        emit_log(
+            app,
+            "AVISO",
+            &format!(
+                "Suspensão do app/sistema detectada (~{} parado). Recalculando a agenda pelo horário atual...",
+                fmt_duration(stalled)
+            ),
+        );
+    })
+    .await;
+}
+
+/// Núcleo do `wait_wallclock_or_cancel`, separado para ser testável sem Tauri.
+/// `on_stall(segundos_parado)` é chamado quando o relógio de parede avança bem
+/// mais que a fatia dormida (= o processo ficou suspenso nesse meio-tempo).
+async fn wait_wallclock_chunked(
+    token: &CancellationToken,
+    total_secs: i64,
+    on_stall: impl Fn(i64),
+) {
+    let deadline = chrono::Local::now() + chrono::Duration::seconds(total_secs.max(0));
+    loop {
+        let remaining_ms = deadline
+            .signed_duration_since(chrono::Local::now())
+            .num_milliseconds();
+        if remaining_ms <= 0 || token.is_cancelled() {
+            return;
+        }
+        let chunk_ms = remaining_ms.min(WALLCLOCK_CHUNK_SECS * 1000);
+        let before = chrono::Local::now();
+        wait_or_cancel(token, std::time::Duration::from_millis(chunk_ms as u64)).await;
+        let stalled_secs = (chrono::Local::now()
+            .signed_duration_since(before)
+            .num_milliseconds()
+            - chunk_ms)
+            / 1000;
+        if stalled_secs > 120 {
+            on_stall(stalled_secs);
+        }
     }
 }
 
@@ -981,6 +1035,38 @@ mod tests {
         assert_eq!(fmt_duration(5400), "1h30min");
         assert_eq!(fmt_duration(900), "15min");
         assert_eq!(fmt_duration(45), "45s");
+    }
+
+    #[tokio::test]
+    async fn wallclock_wait_ends_on_deadline() {
+        let token = CancellationToken::new();
+        let start = std::time::Instant::now();
+        wait_wallclock_chunked(&token, 2, |_| {}).await;
+        let elapsed = start.elapsed().as_secs_f64();
+        assert!((1.5..4.0).contains(&elapsed), "esperou {elapsed}s, esperado ~2s");
+    }
+
+    #[tokio::test]
+    async fn wallclock_wait_returns_immediately_when_due() {
+        let token = CancellationToken::new();
+        let start = std::time::Instant::now();
+        wait_wallclock_chunked(&token, 0, |_| {}).await;
+        wait_wallclock_chunked(&token, -30, |_| {}).await;
+        assert!(start.elapsed().as_millis() < 500);
+    }
+
+    #[tokio::test]
+    async fn wallclock_wait_cancels_early() {
+        let token = CancellationToken::new();
+        let t2 = token.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            t2.cancel();
+        });
+        let start = std::time::Instant::now();
+        // Espera "longa" (várias fatias) interrompida pelo cancel na 1ª fatia.
+        wait_wallclock_chunked(&token, 120, |_| {}).await;
+        assert!(start.elapsed().as_secs() < 5);
     }
 
     #[test]
