@@ -2614,7 +2614,7 @@ dependencies = [
 
 [[package]]
 name = "meu-ponto"
-version = "3.0.12"
+version = "3.0.13"
 dependencies = [
  "chromiumoxide",
  "chrono",
@@ -2624,6 +2624,8 @@ dependencies = [
  "icalendar",
  "keyring",
  "log",
+ "objc2 0.6.4",
+ "objc2-foundation 0.3.2",
  "open",
  "rand 0.8.5",
  "reqwest 0.12.28",
