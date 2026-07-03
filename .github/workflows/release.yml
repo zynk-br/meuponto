@@ -11,7 +11,32 @@ permissions:
   contents: write
 
 jobs:
+  # Cria o draft do release UMA vez antes dos builds. Sem isso, os 3 jobs da
+  # matriz correm entre si e o tauri-action pode criar releases duplicados na
+  # mesma tag (aconteceu na v3.0.12, que saiu sem os binários arm64).
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create.outputs.result }}
+    steps:
+      - name: Create draft release
+        id: create
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: process.env.GITHUB_REF_NAME,
+              name: `Meu Ponto ${process.env.GITHUB_REF_NAME}`,
+              body: "Veja os arquivos abaixo para baixar e instalar. Atualização automática disponível para versões anteriores.",
+              draft: true,
+              prerelease: false,
+            });
+            return data.id;
+
   build:
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
@@ -65,9 +90,5 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "Meu Ponto ${{ github.ref_name }}"
-          releaseBody: "Veja os arquivos abaixo para baixar e instalar. Atualização automática disponível para versões anteriores."
-          releaseDraft: true
-          prerelease: false
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           args: ${{ matrix.args }}
